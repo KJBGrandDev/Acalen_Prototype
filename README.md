@@ -31,11 +31,11 @@ You can sign in using the form or use the **Quick Demo Access** buttons on the l
 ## Implemented Prototype Modules
 1. **System Login & RBAC (`LoginPage`)** — Form validation, password toggle, recovery modal, and role-enforced navigation.
 2. **Manager Dashboard (`DashboardPage`)** — Live Today's Sales & Order Count synced with POS, Items Below Safety Stock, Items Nearing Expiry, 7-Day Demand Forecast chart, and clickable Acalen Advisory Recommendations.
-3. **Point-of-Sale (`PosPage`)** — Category & search filtering, real-time stock checks, FEFO (First-Expired, First-Out) automatic batch deduction, Senior Citizen / PWD 20% discount + 12% VAT exemption, Cash & E-Wallet payments, printable browser receipt, and current-shift returns/voids.
-4. **Inventory Management (`InventoryPage`)** — Batch-level stock tracking (`Add Product`, `Stock In`, `Stock Transfer`, `Record Wastage / Shrinkage`), FEFO batch detail modal, and stock movement audit history.
-5. **Business Rules & Thresholds (`RulesPage`)** — No-code configuration of per-product Reorder Level, Safety Stock, Target Gross Profit Margin, Expiry Warning Days, and Markdown % with immediate rule re-evaluation.
-6. **Demand Forecasting (`ForecastsPage`)** — Historical vs. Predicted Demand chart across 7 / 14 / 30-day horizons with Holt-Winters, Chronos-Bolt, and Hybrid Ensemble model comparison.
-7. **Reports & Business Analysis (`ReportsPage`)** — Gross sales, transactions, gross profit margin, wastage & audit shrinkage summary, product profitability table, live Acalen Decision Support table, CSV export, and Manager Advisory Review queue.
+3. **Point-of-Sale (`PosPage`)** — Category & search filtering, real-time stock checks, FEFO (First-Expired, First-Out) automatic batch deduction for both finished menu items and micro-ingredient BOMs, Senior Citizen / PWD 20% discount + 12% VAT exemption, Cash & E-Wallet payments, printable browser receipt, and current-shift returns/voids.
+4. **Inventory Management (`InventoryPage`)** — Separated **Finished Menu Products** and **Raw Ingredients & Supplies** views, micro-ingredient Bill of Materials (BOM) viewer & inline recipe editor, batch-level stock tracking (`Add Product`, `Stock In`, `Stock Transfer`, `Record Wastage / Shrinkage`), FEFO batch detail modal, and stock movement audit history.
+5. **Business Rules & Thresholds (`RulesPage`)** — 2-Tier **Category Group Policies + Per-Product Custom Overrides** separated into Finished vs. Raw/Supply views, rule toggles & precedence guardrails (suppressing reorders during near-expiry surplus & enforcing ≥35% post-markdown margin floor), plus a **Live IF-THEN What-If Preview**.
+6. **Demand Forecasting (`ForecastsPage`)** — Historical vs. Predicted Demand chart across 7 / 14 / 30-day horizons with Holt-Winters, Chronos-Bolt, and Hybrid Ensemble accuracy metrics, data-readiness guards (`<6 mos` history check), and a **Derived Raw Ingredient Usage (BOM)** forecast tab.
+7. **Reports & Audit Trail (`ReportsPage`)** — Gross sales, transactions, gross profit margin, wastage & audit shrinkage summary, product profitability table, live Acalen Decision Support table, CSV export, Manager Advisory Review queue, and **RA 10173 System Audit & Activity Log**.
 
 ## Local Development
 ```bash

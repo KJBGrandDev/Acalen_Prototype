@@ -6,8 +6,10 @@ import {
   ChevronLeft,
   ChevronRight,
   Clock,
+  Coffee,
   Download,
   Eye,
+  Layers,
   Pencil,
   Plus,
   Trash2,
@@ -19,15 +21,17 @@ import {
   daysBetween,
   formatDateShort,
   formatPeso,
+  formatQty,
   getEarliestActiveBatch,
   getExpiryStatus,
   getGrossMarginPct,
   getProductBatches,
   getProductStock,
   getStockStatus,
+  resolveEffectiveRule,
 } from '../engine/acalenEngine';
 import { StockStatusPill } from '../components/StatusBadge';
-import { CategoryName, Product } from '../types/acalen';
+import { CategoryName, Product, ProductItemType, RecipeIngredient } from '../types/acalen';
 
 const PAGE_SIZE = 6;
 
@@ -35,15 +39,19 @@ export const InventoryPage: React.FC = () => {
   const {
     products,
     batches,
+    groupPolicies,
     rules,
     stockMovements,
+    derivedIngredientForecasts,
     addProduct,
     editProduct,
+    updateProductRecipe,
     recordStockIn,
     recordStockTransfer,
     recordWastage,
   } = useAcalen();
 
+  const [itemTypeTab, setItemTypeTab] = useState<'ALL' | ProductItemType>('FINISHED_PRODUCT');
   const [search, setSearch] = useState('');
   const [catFilter, setCatFilter] = useState('ALL');
   const [stockFilter, setStockFilter] = useState('ALL');
@@ -51,51 +59,81 @@ export const InventoryPage: React.FC = () => {
   const [page, setPage] = useState(1);
 
   const [viewProductId, setViewProductId] = useState<number | null>(null);
+  const [editingRecipe, setEditingRecipe] = useState(false);
+  const [recipeDraft, setRecipeDraft] = useState<RecipeIngredient[]>([]);
+  const [newIngredientId, setNewIngredientId] = useState<string>('1');
+  const [newIngredientQty, setNewIngredientQty] = useState<string>('0.018');
+
   const [editProductTarget, setEditProductTarget] = useState<Product | null>(null);
   const [activeModal, setActiveModal] = useState<
     null | 'add_product' | 'stock_in' | 'transfer' | 'wastage'
   >(null);
 
-  // Enrich products with computed stock, safety stock, earliest batch & statuses
+  const rawIngredientsList = useMemo(
+    () => products.filter((p) => p.item_type === 'RAW_INGREDIENT'),
+    [products]
+  );
+
+  // Enrich products with effective rules, stock, earliest batch & derived BOM info
   const enriched = useMemo(() => {
     return products.map((product) => {
       const rule = rules.find((r) => r.product_id === product.product_id);
-      const safetyStock = rule?.safety_stock ?? 10;
-      const warnDays = rule?.expiry_warning_days ?? 7;
+      const eff = resolveEffectiveRule(product, rule, groupPolicies);
       const currentStock = getProductStock(batches, product.product_id);
       const earliestBatch = getEarliestActiveBatch(batches, product.product_id);
-      const stockStatus = getStockStatus(currentStock, safetyStock);
+      const stockStatus = getStockStatus(currentStock, eff.safety_stock);
       const expiryStatus = getExpiryStatus(
         earliestBatch?.expiration_date,
-        warnDays,
-        REFERENCE_TODAY
+        eff.expiry_warning_days,
+        REFERENCE_TODAY,
+        product.is_perishable
       );
+      const derivedForecast = derivedIngredientForecasts.find(
+        (d) => d.ingredient_id === product.product_id
+      );
+
       return {
         product,
-        rule,
-        safetyStock,
+        eff,
+        safetyStock: eff.safety_stock,
         currentStock,
         earliestBatch,
         stockStatus,
         expiryStatus,
+        derivedForecast,
       };
     });
-  }, [products, batches, rules]);
+  }, [products, batches, rules, groupPolicies, derivedIngredientForecasts]);
+
+  const counts = useMemo(() => {
+    const finished = enriched.filter((e) => e.product.item_type === 'FINISHED_PRODUCT').length;
+    const raw = enriched.filter((e) => e.product.item_type === 'RAW_INGREDIENT').length;
+    return { finished, raw, all: enriched.length };
+  }, [enriched]);
 
   const kpis = useMemo(() => {
-    const total = enriched.length;
-    const lowStock = enriched.filter((e) => e.stockStatus === 'LOW_STOCK').length;
-    const expiringSoon = enriched.filter(
-      (e) =>
-        e.currentStock > 0 &&
-        (e.expiryStatus === 'EXPIRING_SOON' || e.expiryStatus === 'EXPIRED')
-    ).length;
-    const outOfStock = enriched.filter((e) => e.stockStatus === 'OUT_OF_STOCK').length;
-    return { total, lowStock, expiringSoon, outOfStock };
-  }, [enriched]);
+    const scope =
+      itemTypeTab === 'ALL'
+        ? enriched
+        : enriched.filter((e) => e.product.item_type === itemTypeTab);
+
+    return {
+      total: scope.length,
+      lowStock: scope.filter((e) => e.stockStatus === 'LOW_STOCK').length,
+      expiringSoon: scope.filter(
+        (e) =>
+          e.currentStock > 0 &&
+          (e.expiryStatus === 'EXPIRING_SOON' || e.expiryStatus === 'EXPIRED')
+      ).length,
+      outOfStock: scope.filter((e) => e.stockStatus === 'OUT_OF_STOCK').length,
+    };
+  }, [enriched, itemTypeTab]);
 
   const filtered = useMemo(() => {
     return enriched.filter((row) => {
+      if (itemTypeTab !== 'ALL' && row.product.item_type !== itemTypeTab) {
+        return false;
+      }
       if (catFilter !== 'ALL' && row.product.category_name !== catFilter) {
         return false;
       }
@@ -115,20 +153,19 @@ export const InventoryPage: React.FC = () => {
       }
       return true;
     });
-  }, [enriched, catFilter, stockFilter, expiryFilter, search]);
+  }, [enriched, itemTypeTab, catFilter, stockFilter, expiryFilter, search]);
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
   const safePage = Math.min(page, totalPages);
-  const pageRows = filtered.slice(
-    (safePage - 1) * PAGE_SIZE,
-    safePage * PAGE_SIZE
-  );
+  const pageRows = filtered.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE);
 
   // Add Product Form State
   const [newForm, setNewForm] = useState({
     product_name: '',
     sku: 'PRD-014',
     category_name: 'Pastries' as CategoryName,
+    item_type: 'FINISHED_PRODUCT' as ProductItemType,
+    is_perishable: true,
     unit_label: 'pcs',
     unit_cost: '45',
     selling_price: '95',
@@ -142,7 +179,6 @@ export const InventoryPage: React.FC = () => {
   });
   const [formError, setFormError] = useState<string | null>(null);
 
-  // Stock In Form
   const [stockInForm, setStockInForm] = useState({
     productId: String(products[0]?.product_id ?? 1),
     batchNumber: 'BATCH-051',
@@ -152,7 +188,6 @@ export const InventoryPage: React.FC = () => {
     reason: 'Supplier delivery restock',
   });
 
-  // Transfer / Wastage Form
   const [movementForm, setMovementForm] = useState({
     productId: String(products[0]?.product_id ?? 1),
     batchId: '',
@@ -162,10 +197,11 @@ export const InventoryPage: React.FC = () => {
     reason: 'Expired or damaged stock disposal',
   });
 
-  // Edit Form State
   const [editForm, setEditForm] = useState({
     product_name: '',
     category_name: 'Coffee' as CategoryName,
+    item_type: 'FINISHED_PRODUCT' as ProductItemType,
+    is_perishable: true,
     unit_label: 'pcs',
     unit_cost: '',
     selling_price: '',
@@ -173,12 +209,21 @@ export const InventoryPage: React.FC = () => {
     sellable_on_pos: true,
   });
 
+  const openViewModal = (productId: number) => {
+    const p = products.find((x) => x.product_id === productId);
+    setViewProductId(productId);
+    setEditingRecipe(false);
+    setRecipeDraft(p?.recipe ? p.recipe.map((r) => ({ ...r })) : []);
+  };
+
   const openEditModal = (product: Product) => {
     setFormError(null);
     setEditProductTarget(product);
     setEditForm({
       product_name: product.product_name,
       category_name: product.category_name,
+      item_type: product.item_type,
+      is_perishable: product.is_perishable,
       unit_label: product.unit_label,
       unit_cost: String(product.unit_cost),
       selling_price: String(product.selling_price),
@@ -212,10 +257,13 @@ export const InventoryPage: React.FC = () => {
       product_name: newForm.product_name,
       sku: newForm.sku,
       category_name: newForm.category_name,
+      item_type: newForm.item_type,
+      is_perishable: newForm.is_perishable,
       unit_label: newForm.unit_label,
       unit_cost: cost,
       selling_price: price,
-      sellable_on_pos: newForm.sellable_on_pos,
+      sellable_on_pos:
+        newForm.item_type === 'FINISHED_PRODUCT' && newForm.sellable_on_pos,
       supplier: newForm.supplier,
       initial_qty: qty,
       batch_number: newForm.batch_number,
@@ -243,11 +291,14 @@ export const InventoryPage: React.FC = () => {
     editProduct(editProductTarget.product_id, {
       product_name: editForm.product_name.trim(),
       category_name: editForm.category_name,
+      item_type: editForm.item_type,
+      is_perishable: editForm.is_perishable,
       unit_label: editForm.unit_label,
       unit_cost: cost,
       selling_price: price,
       supplier: editForm.supplier.trim(),
-      sellable_on_pos: editForm.sellable_on_pos,
+      sellable_on_pos:
+        editForm.item_type === 'FINISHED_PRODUCT' && editForm.sellable_on_pos,
     });
     setEditProductTarget(null);
     setFormError(null);
@@ -321,13 +372,109 @@ export const InventoryPage: React.FC = () => {
     ? enriched.find((e) => e.product.product_id === viewProductId) ?? null
     : null;
 
+  const handleAddRecipeIngredient = () => {
+    const ingId = Number(newIngredientId);
+    const qtyPerUnit = Number(newIngredientQty);
+    const ing = rawIngredientsList.find((r) => r.product_id === ingId);
+    if (!ing || qtyPerUnit <= 0) return;
+
+    let displayQty = qtyPerUnit;
+    let displayUnit = ing.unit_label;
+    if (ing.unit_label === 'kg' && qtyPerUnit < 1) {
+      displayQty = Math.round(qtyPerUnit * 1000);
+      displayUnit = 'g';
+    } else if (ing.unit_label === 'L' && qtyPerUnit < 1) {
+      displayQty = Math.round(qtyPerUnit * 1000);
+      displayUnit = 'mL';
+    }
+
+    setRecipeDraft((prev) => {
+      const exists = prev.some((x) => x.ingredient_id === ingId);
+      if (exists) {
+        return prev.map((x) =>
+          x.ingredient_id === ingId
+            ? { ingredient_id: ingId, qty_per_unit: qtyPerUnit, display_qty: displayQty, display_unit: displayUnit }
+            : x
+        );
+      }
+      return [
+        ...prev,
+        { ingredient_id: ingId, qty_per_unit: qtyPerUnit, display_qty: displayQty, display_unit: displayUnit },
+      ];
+    });
+  };
+
   return (
     <div className="space-y-6">
-      {/* 4 KPI Cards matching Figma Image 1 */}
+      {/* Item Type Separation Tabs: Finished Menu vs Raw Ingredients */}
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="inline-flex rounded-xl border border-[#E8ECF2] bg-white p-1 shadow-xs">
+          <button
+            type="button"
+            onClick={() => {
+              setItemTypeTab('FINISHED_PRODUCT');
+              setPage(1);
+            }}
+            className={`inline-flex items-center gap-2 rounded-lg px-4 py-2 text-xs font-semibold ${
+              itemTypeTab === 'FINISHED_PRODUCT'
+                ? 'bg-[#1E325C] text-white'
+                : 'text-[#6B7280] hover:text-[#111827]'
+            }`}
+          >
+            <Coffee className="h-3.5 w-3.5" />
+            Finished Menu Products ({counts.finished})
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setItemTypeTab('RAW_INGREDIENT');
+              setPage(1);
+            }}
+            className={`inline-flex items-center gap-2 rounded-lg px-4 py-2 text-xs font-semibold ${
+              itemTypeTab === 'RAW_INGREDIENT'
+                ? 'bg-[#1E325C] text-white'
+                : 'text-[#6B7280] hover:text-[#111827]'
+            }`}
+          >
+            <Layers className="h-3.5 w-3.5" />
+            Raw Ingredients &amp; Supplies ({counts.raw})
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setItemTypeTab('ALL');
+              setPage(1);
+            }}
+            className={`rounded-lg px-3.5 py-2 text-xs font-semibold ${
+              itemTypeTab === 'ALL'
+                ? 'bg-[#1E325C] text-white'
+                : 'text-[#6B7280] hover:text-[#111827]'
+            }`}
+          >
+            All Items ({counts.all})
+          </button>
+        </div>
+
+        <p className="text-xs text-[#6B7280]">
+          {itemTypeTab === 'FINISHED_PRODUCT'
+            ? 'Sellable POS menu items linked to micro-ingredient BOM recipes'
+            : itemTypeTab === 'RAW_INGREDIENT'
+              ? 'Micro-ingredients & packaging tracked via derived menu forecast usage'
+              : 'Combined finished goods & raw ingredient inventory'}
+        </p>
+      </div>
+
+      {/* 4 KPI Cards */}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <div className="acalen-card p-5">
           <div className="flex items-start justify-between">
-            <span className="text-xs font-medium text-[#6B7280]">Total Products</span>
+            <span className="text-xs font-medium text-[#6B7280]">
+              {itemTypeTab === 'RAW_INGREDIENT'
+                ? 'Raw Ingredients & Supplies'
+                : itemTypeTab === 'FINISHED_PRODUCT'
+                  ? 'Finished Menu Items'
+                  : 'Total Products'}
+            </span>
             <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-[#EFF3F9] text-[#1E325C]">
               <Box className="h-4 w-4" />
             </span>
@@ -335,7 +482,7 @@ export const InventoryPage: React.FC = () => {
           <p className="mt-3 text-3xl font-bold text-[#111827] tabular-nums">
             {kpis.total}
           </p>
-          <p className="mt-1 text-xs text-[#6B7280]">Across all categories</p>
+          <p className="mt-1 text-xs text-[#6B7280]">In selected inventory view</p>
         </div>
 
         <div className="acalen-card p-5">
@@ -500,9 +647,15 @@ export const InventoryPage: React.FC = () => {
       {/* Inventory Records Table */}
       <div className="acalen-card overflow-hidden">
         <div className="flex items-center justify-between border-b border-[#E8ECF2] px-6 py-4">
-          <h2 className="text-base font-semibold text-[#111827]">Inventory Records</h2>
+          <h2 className="text-base font-semibold text-[#111827]">
+            {itemTypeTab === 'FINISHED_PRODUCT'
+              ? 'Finished Menu Products'
+              : itemTypeTab === 'RAW_INGREDIENT'
+                ? 'Raw Ingredients & Supplies'
+                : 'All Inventory Records'}
+          </h2>
           <span className="text-xs font-medium text-[#6B7280] tabular-nums">
-            {filtered.length} products
+            {filtered.length} items
           </span>
         </div>
 
@@ -510,10 +663,12 @@ export const InventoryPage: React.FC = () => {
           <table className="w-full text-left text-xs">
             <thead className="border-b border-[#E8ECF2] bg-[#F9FAFB] text-[11px] font-medium text-[#6B7280]">
               <tr>
-                <th className="px-6 py-3.5">Product</th>
+                <th className="px-6 py-3.5">Product &amp; Micro-Link</th>
                 <th className="px-4 py-3.5">Category</th>
                 <th className="px-4 py-3.5">Current Stock</th>
-                <th className="px-4 py-3.5">Safety Stock</th>
+                <th className="px-4 py-3.5">
+                  {itemTypeTab === 'RAW_INGREDIENT' ? 'Derived 7d Usage' : 'Safety Stock'}
+                </th>
                 <th className="px-4 py-3.5">Unit Cost</th>
                 <th className="px-4 py-3.5">Batch/Expiration</th>
                 <th className="px-4 py-3.5">Status</th>
@@ -536,6 +691,7 @@ export const InventoryPage: React.FC = () => {
                     earliestBatch,
                     stockStatus,
                     expiryStatus,
+                    derivedForecast,
                   }) => {
                     const stockColor =
                       stockStatus === 'OUT_OF_STOCK'
@@ -548,13 +704,26 @@ export const InventoryPage: React.FC = () => {
                         ? 'text-[#B4690E]'
                         : 'text-[#6B7280]';
 
+                    const recipeCount = product.recipe?.length ?? 0;
+
                     return (
                       <tr key={product.product_id} className="hover:bg-[#F9FAFB]">
                         <td className="px-6 py-4">
-                          <p className="font-semibold text-[#111827]">
-                            {product.product_name}
-                          </p>
-                          <p className="font-mono text-[11px] text-[#9CA3AF]">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <p className="font-semibold text-[#111827]">
+                              {product.product_name}
+                            </p>
+                            {product.item_type === 'FINISHED_PRODUCT' ? (
+                              <span className="rounded bg-[#EFF3F9] px-1.5 py-0.5 text-[10px] font-medium text-[#1E325C]">
+                                BOM · {recipeCount} ing
+                              </span>
+                            ) : (
+                              <span className="rounded bg-[#F3F4F6] px-1.5 py-0.5 text-[10px] font-medium text-[#4B5563]">
+                                {product.is_perishable ? 'Raw Ingredient' : 'Non-Perishable'}
+                              </span>
+                            )}
+                          </div>
+                          <p className="mt-0.5 font-mono text-[11px] text-[#9CA3AF]">
                             {product.sku}
                           </p>
                         </td>
@@ -564,10 +733,25 @@ export const InventoryPage: React.FC = () => {
                         <td
                           className={`px-4 py-4 font-bold tabular-nums ${stockColor}`}
                         >
-                          {currentStock} {product.unit_label}
+                          {formatQty(currentStock, product.unit_label)}
                         </td>
                         <td className="px-4 py-4 text-[#6B7280] tabular-nums">
-                          {safetyStock} {product.unit_label}
+                          {itemTypeTab === 'RAW_INGREDIENT' && derivedForecast ? (
+                            <div>
+                              <p className="font-semibold text-[#1E325C]">
+                                {formatQty(
+                                  derivedForecast.derived_7d_usage,
+                                  product.unit_label
+                                )}{' '}
+                                / 7d
+                              </p>
+                              <p className="text-[10px] text-[#9CA3AF]">
+                                Safety {safetyStock} {product.unit_label}
+                              </p>
+                            </div>
+                          ) : (
+                            `${safetyStock} ${product.unit_label}`
+                          )}
                         </td>
                         <td className="px-4 py-4 font-semibold text-[#111827] tabular-nums">
                           {formatPeso(product.unit_cost, product.unit_cost % 1 !== 0)}
@@ -579,7 +763,9 @@ export const InventoryPage: React.FC = () => {
                                 {earliestBatch.batch_number}
                               </p>
                               <p className={`text-[11px] ${expColor}`}>
-                                {formatDateShort(earliestBatch.expiration_date)}
+                                {product.is_perishable
+                                  ? formatDateShort(earliestBatch.expiration_date)
+                                  : 'No shelf expiry'}
                               </p>
                             </>
                           ) : (
@@ -596,7 +782,7 @@ export const InventoryPage: React.FC = () => {
                           <div className="inline-flex items-center gap-3">
                             <button
                               type="button"
-                              onClick={() => setViewProductId(product.product_id)}
+                              onClick={() => openViewModal(product.product_id)}
                               className="inline-flex flex-col items-center gap-0.5 text-[11px] font-medium text-[#4B5563] hover:text-[#1E325C]"
                             >
                               <Eye className="h-3.5 w-3.5" />
@@ -626,7 +812,7 @@ export const InventoryPage: React.FC = () => {
           <p className="tabular-nums">
             Showing {filtered.length === 0 ? 0 : (safePage - 1) * PAGE_SIZE + 1}–
             {Math.min(safePage * PAGE_SIZE, filtered.length)} of {filtered.length}{' '}
-            products
+            items
           </p>
           <div className="flex items-center gap-1.5">
             <button
@@ -665,7 +851,7 @@ export const InventoryPage: React.FC = () => {
         </div>
       </div>
 
-      {/* View Product & Batches Drawer Modal */}
+      {/* View Product, Micro-Ingredients BOM & Batches Modal */}
       {inspectedProduct && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/45 p-4"
@@ -673,18 +859,28 @@ export const InventoryPage: React.FC = () => {
           aria-modal="true"
           aria-labelledby="view-product-title"
         >
-          <div className="flex max-h-[86vh] w-full max-w-2xl flex-col overflow-hidden rounded-2xl border border-[#E8ECF2] bg-white shadow-2xl">
+          <div className="flex max-h-[88vh] w-full max-w-2xl flex-col overflow-hidden rounded-2xl border border-[#E8ECF2] bg-white shadow-2xl">
             <div className="flex items-center justify-between border-b border-[#E8ECF2] px-6 py-4">
               <div>
-                <h2
-                  id="view-product-title"
-                  className="text-base font-semibold text-[#111827]"
-                >
-                  {inspectedProduct.product.product_name} ({inspectedProduct.product.sku})
-                </h2>
-                <p className="text-xs text-[#6B7280]">
+                <div className="flex items-center gap-2">
+                  <h2
+                    id="view-product-title"
+                    className="text-base font-semibold text-[#111827]"
+                  >
+                    {inspectedProduct.product.product_name} ({inspectedProduct.product.sku})
+                  </h2>
+                  <span className="rounded-md bg-[#EFF3F9] px-2 py-0.5 text-[10px] font-semibold text-[#1E325C]">
+                    {inspectedProduct.product.item_type === 'FINISHED_PRODUCT'
+                      ? 'Finished Menu Item'
+                      : 'Raw Ingredient / Supply'}
+                  </span>
+                </div>
+                <p className="mt-0.5 text-xs text-[#6B7280]">
                   {inspectedProduct.product.category_name} · Supplier:{' '}
-                  {inspectedProduct.product.supplier}
+                  {inspectedProduct.product.supplier} · Policy:{' '}
+                  {inspectedProduct.eff.source === 'GROUP_DEFAULT'
+                    ? `Inherits ${inspectedProduct.eff.group_name} Group`
+                    : 'Custom Override'}
                 </p>
               </div>
               <button
@@ -702,8 +898,10 @@ export const InventoryPage: React.FC = () => {
                 <div className="rounded-lg border border-[#E8ECF2] bg-[#F8FAFC] p-3">
                   <p className="text-[11px] text-[#6B7280]">Total On Hand</p>
                   <p className="mt-0.5 text-base font-bold text-[#111827] tabular-nums">
-                    {inspectedProduct.currentStock}{' '}
-                    {inspectedProduct.product.unit_label}
+                    {formatQty(
+                      inspectedProduct.currentStock,
+                      inspectedProduct.product.unit_label
+                    )}
                   </p>
                 </div>
                 <div className="rounded-lg border border-[#E8ECF2] bg-[#F8FAFC] p-3">
@@ -713,26 +911,291 @@ export const InventoryPage: React.FC = () => {
                   </p>
                 </div>
                 <div className="rounded-lg border border-[#E8ECF2] bg-[#F8FAFC] p-3">
-                  <p className="text-[11px] text-[#6B7280]">Selling Price</p>
+                  <p className="text-[11px] text-[#6B7280]">
+                    {inspectedProduct.product.item_type === 'FINISHED_PRODUCT'
+                      ? 'Selling Price'
+                      : 'Derived 7d Usage'}
+                  </p>
                   <p className="mt-0.5 text-base font-bold text-[#111827] tabular-nums">
-                    {formatPeso(
-                      inspectedProduct.product.markdown_price ??
-                        inspectedProduct.product.selling_price
-                    )}
+                    {inspectedProduct.product.item_type === 'FINISHED_PRODUCT'
+                      ? formatPeso(
+                          inspectedProduct.product.markdown_price ??
+                            inspectedProduct.product.selling_price
+                        )
+                      : formatQty(
+                          inspectedProduct.derivedForecast?.derived_7d_usage ?? 0,
+                          inspectedProduct.product.unit_label
+                        )}
                   </p>
                 </div>
                 <div className="rounded-lg border border-[#E8ECF2] bg-[#F8FAFC] p-3">
-                  <p className="text-[11px] text-[#6B7280]">Gross Margin</p>
+                  <p className="text-[11px] text-[#6B7280]">
+                    {inspectedProduct.product.item_type === 'FINISHED_PRODUCT'
+                      ? 'Gross Margin'
+                      : 'Safety Stock'}
+                  </p>
                   <p className="mt-0.5 text-base font-bold text-[#1E325C] tabular-nums">
-                    {getGrossMarginPct(
-                      inspectedProduct.product.unit_cost,
-                      inspectedProduct.product.markdown_price ??
-                        inspectedProduct.product.selling_price
-                    ).toFixed(1)}
-                    %
+                    {inspectedProduct.product.item_type === 'FINISHED_PRODUCT'
+                      ? `${getGrossMarginPct(
+                          inspectedProduct.product.unit_cost,
+                          inspectedProduct.product.markdown_price ??
+                            inspectedProduct.product.selling_price
+                        ).toFixed(1)}%`
+                      : formatQty(
+                          inspectedProduct.safetyStock,
+                          inspectedProduct.product.unit_label
+                        )}
                   </p>
                 </div>
               </div>
+
+              {/* Micro-Ingredients BOM Section for Finished Products */}
+              {inspectedProduct.product.item_type === 'FINISHED_PRODUCT' && (
+                <div className="rounded-xl border border-[#E8ECF2] bg-[#F9FAFB] p-4">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div>
+                      <h3 className="text-xs font-semibold text-[#111827] uppercase">
+                        Micro-Ingredients Recipe (Bill of Materials)
+                      </h3>
+                      <p className="text-[11px] text-[#6B7280]">
+                        Deducted FEFO on every POS sale and exploded into raw ingredient demand forecasts
+                      </p>
+                    </div>
+                    {!editingRecipe ? (
+                      <button
+                        type="button"
+                        onClick={() => setEditingRecipe(true)}
+                        className="inline-flex items-center gap-1 rounded-lg border border-[#D8E1EE] bg-white px-2.5 py-1 text-[11px] font-semibold text-[#1E325C] hover:bg-[#EFF3F9]"
+                      >
+                        <Pencil className="h-3 w-3" />
+                        Edit Recipe
+                      </button>
+                    ) : (
+                      <div className="flex gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setEditingRecipe(false);
+                            setRecipeDraft(
+                              inspectedProduct.product.recipe?.map((r) => ({ ...r })) ?? []
+                            );
+                          }}
+                          className="rounded-lg border border-[#E5E7EB] bg-white px-2.5 py-1 text-[11px] font-medium text-[#4B5563]"
+                        >
+                          Cancel
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            updateProductRecipe(
+                              inspectedProduct.product.product_id,
+                              recipeDraft
+                            );
+                            setEditingRecipe(false);
+                          }}
+                          className="rounded-lg bg-[#1E325C] px-3 py-1 text-[11px] font-semibold text-white hover:bg-[#162647]"
+                        >
+                          Save BOM
+                        </button>
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="mt-3 overflow-hidden rounded-lg border border-[#E8ECF2] bg-white">
+                    <table className="w-full text-left text-xs">
+                      <thead className="bg-[#F8FAFC] text-[11px] font-medium text-[#6B7280]">
+                        <tr>
+                          <th className="px-3 py-2">Raw Ingredient</th>
+                          <th className="px-3 py-2">Per 1 Unit Sold</th>
+                          <th className="px-3 py-2">Raw Stock On Hand</th>
+                          <th className="px-3 py-2 text-right">Max Servings</th>
+                          {editingRecipe && <th className="px-3 py-2 text-right">Remove</th>}
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-[#F1F5F9]">
+                        {(editingRecipe
+                          ? recipeDraft
+                          : inspectedProduct.product.recipe ?? []
+                        ).map((line) => {
+                          const ing = products.find(
+                            (p) => p.product_id === line.ingredient_id
+                          );
+                          if (!ing) return null;
+                          const rawAvail = getProductStock(batches, ing.product_id);
+                          const maxServings =
+                            line.qty_per_unit > 0
+                              ? Math.floor(rawAvail / line.qty_per_unit)
+                              : 0;
+                          return (
+                            <tr key={line.ingredient_id}>
+                              <td className="px-3 py-2 font-semibold text-[#111827]">
+                                {ing.product_name}{' '}
+                                <span className="font-mono text-[10px] text-[#9CA3AF]">
+                                  ({ing.sku})
+                                </span>
+                              </td>
+                              <td className="px-3 py-2 font-medium text-[#1E325C] tabular-nums">
+                                {line.display_qty} {line.display_unit}{' '}
+                                <span className="text-[10px] text-[#9CA3AF]">
+                                  ({line.qty_per_unit} {ing.unit_label})
+                                </span>
+                              </td>
+                              <td className="px-3 py-2 tabular-nums">
+                                <span
+                                  className={
+                                    rawAvail <= 0
+                                      ? 'font-semibold text-[#C53030]'
+                                      : 'text-[#374151]'
+                                  }
+                                >
+                                  {formatQty(rawAvail, ing.unit_label)}
+                                </span>
+                              </td>
+                              <td className="px-3 py-2 text-right font-semibold tabular-nums">
+                                {maxServings.toLocaleString()}
+                              </td>
+                              {editingRecipe && (
+                                <td className="px-3 py-2 text-right">
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      setRecipeDraft((prev) =>
+                                        prev.filter(
+                                          (x) => x.ingredient_id !== line.ingredient_id
+                                        )
+                                      )
+                                    }
+                                    className="text-[#C53030] hover:underline"
+                                  >
+                                    Remove
+                                  </button>
+                                </td>
+                              )}
+                            </tr>
+                          );
+                        })}
+                        {(editingRecipe
+                          ? recipeDraft
+                          : inspectedProduct.product.recipe ?? []
+                        ).length === 0 && (
+                          <tr>
+                            <td
+                              colSpan={editingRecipe ? 5 : 4}
+                              className="px-3 py-4 text-center text-[#9CA3AF]"
+                            >
+                              No micro-ingredients linked yet.
+                            </td>
+                          </tr>
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  {editingRecipe && (
+                    <div className="mt-3 flex flex-wrap items-end gap-2">
+                      <div className="flex-1">
+                        <label className="mb-1 block text-[10px] font-medium text-[#6B7280]">
+                          Add / Update Ingredient
+                        </label>
+                        <select
+                          value={newIngredientId}
+                          onChange={(e) => setNewIngredientId(e.target.value)}
+                          className="w-full rounded-lg border border-[#D1D5DB] bg-white px-2.5 py-1.5 text-xs"
+                        >
+                          {rawIngredientsList.map((raw) => (
+                            <option key={raw.product_id} value={raw.product_id}>
+                              {raw.product_name} ({raw.unit_label})
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                      <div className="w-32">
+                        <label className="mb-1 block text-[10px] font-medium text-[#6B7280]">
+                          Qty (in stock unit)
+                        </label>
+                        <input
+                          type="number"
+                          step="0.001"
+                          min="0.001"
+                          value={newIngredientQty}
+                          onChange={(e) => setNewIngredientQty(e.target.value)}
+                          className="w-full rounded-lg border border-[#D1D5DB] bg-white px-2.5 py-1.5 text-xs tabular-nums"
+                        />
+                      </div>
+                      <button
+                        type="button"
+                        onClick={handleAddRecipeIngredient}
+                        className="rounded-lg border border-[#1E325C] bg-white px-3 py-1.5 text-xs font-semibold text-[#1E325C] hover:bg-[#EFF3F9]"
+                      >
+                        + Add Line
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Reverse BOM Lookup for Raw Ingredients */}
+              {inspectedProduct.product.item_type === 'RAW_INGREDIENT' &&
+                inspectedProduct.derivedForecast && (
+                  <div className="rounded-xl border border-[#E8ECF2] bg-[#F9FAFB] p-4">
+                    <h3 className="text-xs font-semibold text-[#111827] uppercase">
+                      Used In Finished Menu Products (Derived 7-Day Forecast)
+                    </h3>
+                    <p className="mt-0.5 text-[11px] text-[#6B7280]">
+                      Total expected 7d consumption:{' '}
+                      <strong className="text-[#1E325C]">
+                        {formatQty(
+                          inspectedProduct.derivedForecast.derived_7d_usage,
+                          inspectedProduct.product.unit_label
+                        )}
+                      </strong>{' '}
+                      across {inspectedProduct.derivedForecast.contributing_products.length}{' '}
+                      menu item(s)
+                    </p>
+                    <div className="mt-3 overflow-hidden rounded-lg border border-[#E8ECF2] bg-white">
+                      <table className="w-full text-left text-xs">
+                        <thead className="bg-[#F8FAFC] text-[11px] font-medium text-[#6B7280]">
+                          <tr>
+                            <th className="px-3 py-2">Finished Product</th>
+                            <th className="px-3 py-2 text-right">7d Forecast</th>
+                            <th className="px-3 py-2 text-right">Raw Usage</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-[#F1F5F9]">
+                          {inspectedProduct.derivedForecast.contributing_products.map(
+                            (cp) => (
+                              <tr key={cp.product_id}>
+                                <td className="px-3 py-2 font-semibold text-[#111827]">
+                                  {cp.product_name}
+                                </td>
+                                <td className="px-3 py-2 text-right tabular-nums">
+                                  {cp.finished_7d_qty} pcs
+                                </td>
+                                <td className="px-3 py-2 text-right font-semibold text-[#1E325C] tabular-nums">
+                                  {formatQty(
+                                    cp.ingredient_usage,
+                                    inspectedProduct.product.unit_label
+                                  )}
+                                </td>
+                              </tr>
+                            )
+                          )}
+                          {inspectedProduct.derivedForecast.contributing_products.length ===
+                            0 && (
+                            <tr>
+                              <td
+                                colSpan={3}
+                                className="px-3 py-4 text-center text-[#9CA3AF]"
+                              >
+                                Not yet linked to any finished menu item recipe.
+                              </td>
+                            </tr>
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )}
 
               <div>
                 <h3 className="text-xs font-semibold text-[#374151] uppercase">
@@ -760,19 +1223,28 @@ export const InventoryPage: React.FC = () => {
                               {b.batch_number}
                             </td>
                             <td className="px-4 py-2.5 font-bold tabular-nums">
-                              {b.qty_on_hand} {inspectedProduct.product.unit_label}
+                              {formatQty(
+                                b.qty_on_hand,
+                                inspectedProduct.product.unit_label
+                              )}
                             </td>
                             <td className="px-4 py-2.5 text-[#6B7280]">
                               {formatDateShort(b.received_at)}
                             </td>
                             <td className="px-4 py-2.5">
-                              <span
-                                className={
-                                  dLeft <= 7 ? 'font-medium text-[#B4690E]' : 'text-[#4B5563]'
-                                }
-                              >
-                                {formatDateShort(b.expiration_date)} ({dLeft}d)
-                              </span>
+                              {inspectedProduct.product.is_perishable ? (
+                                <span
+                                  className={
+                                    dLeft <= 7
+                                      ? 'font-medium text-[#B4690E]'
+                                      : 'text-[#4B5563]'
+                                  }
+                                >
+                                  {formatDateShort(b.expiration_date)} ({dLeft}d)
+                                </span>
+                              ) : (
+                                <span className="text-[#9CA3AF]">Non-perishable</span>
+                              )}
                             </td>
                           </tr>
                         );
@@ -807,7 +1279,7 @@ export const InventoryPage: React.FC = () => {
                             m.quantity >= 0 ? 'text-[#15803D]' : 'text-[#C53030]'
                           }`}
                         >
-                          {m.quantity >= 0 ? `+${m.quantity}` : m.quantity}{' '}
+                          {m.quantity >= 0 ? `+${formatQty(m.quantity)}` : formatQty(m.quantity)}{' '}
                           {inspectedProduct.product.unit_label}
                         </span>
                       </div>
@@ -853,6 +1325,46 @@ export const InventoryPage: React.FC = () => {
                   {formError}
                 </p>
               )}
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="mb-1 block font-medium text-[#374151]">
+                    Item Classification
+                  </label>
+                  <select
+                    value={newForm.item_type}
+                    onChange={(e) => {
+                      const nextType = e.target.value as ProductItemType;
+                      setNewForm({
+                        ...newForm,
+                        item_type: nextType,
+                        sellable_on_pos: nextType === 'FINISHED_PRODUCT',
+                        unit_label: nextType === 'RAW_INGREDIENT' ? 'kg' : 'pcs',
+                      });
+                    }}
+                    className="w-full rounded-lg border border-[#D1D5DB] px-2.5 py-2"
+                  >
+                    <option value="FINISHED_PRODUCT">Finished Menu Product</option>
+                    <option value="RAW_INGREDIENT">Raw Ingredient / Supply</option>
+                  </select>
+                </div>
+                <div className="flex items-end pb-2">
+                  <label className="flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      checked={newForm.is_perishable}
+                      onChange={(e) =>
+                        setNewForm({ ...newForm, is_perishable: e.target.checked })
+                      }
+                      className="rounded border-[#D1D5DB]"
+                    />
+                    <span className="font-medium text-[#374151]">
+                      Perishable (Track Expiry Alerts)
+                    </span>
+                  </label>
+                </div>
+              </div>
+
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="mb-1 block font-medium text-[#374151]">
@@ -882,7 +1394,7 @@ export const InventoryPage: React.FC = () => {
               <div className="grid grid-cols-3 gap-3">
                 <div>
                   <label className="mb-1 block font-medium text-[#374151]">
-                    Category
+                    Category (Group Policy)
                   </label>
                   <select
                     value={newForm.category_name}
@@ -1013,18 +1525,6 @@ export const InventoryPage: React.FC = () => {
                 </div>
               </div>
 
-              <label className="flex items-center gap-2 pt-1">
-                <input
-                  type="checkbox"
-                  checked={newForm.sellable_on_pos}
-                  onChange={(e) =>
-                    setNewForm({ ...newForm, sellable_on_pos: e.target.checked })
-                  }
-                  className="rounded border-[#D1D5DB]"
-                />
-                <span className="text-[#374151]">Show as sellable menu item on POS</span>
-              </label>
-
               <div className="flex justify-end gap-2 pt-3">
                 <button
                   type="button"
@@ -1128,6 +1628,17 @@ export const InventoryPage: React.FC = () => {
                   className="w-full rounded-lg border border-[#D1D5DB] px-3 py-2"
                 />
               </div>
+              <label className="flex items-center gap-2 pt-1">
+                <input
+                  type="checkbox"
+                  checked={editForm.is_perishable}
+                  onChange={(e) =>
+                    setEditForm({ ...editForm, is_perishable: e.target.checked })
+                  }
+                  className="rounded border-[#D1D5DB]"
+                />
+                <span className="text-[#374151]">Perishable batch item</span>
+              </label>
               <div className="flex justify-end gap-2 pt-3">
                 <button
                   type="button"
@@ -1220,6 +1731,7 @@ export const InventoryPage: React.FC = () => {
                   </label>
                   <input
                     type="number"
+                    step="0.1"
                     value={stockInForm.qty}
                     onChange={(e) =>
                       setStockInForm({ ...stockInForm, qty: e.target.value })
@@ -1338,8 +1850,7 @@ export const InventoryPage: React.FC = () => {
                 >
                   {products.map((p) => (
                     <option key={p.product_id} value={p.product_id}>
-                      {p.product_name} ({getProductStock(batches, p.product_id)}{' '}
-                      {p.unit_label})
+                      {p.product_name} ({formatQty(getProductStock(batches, p.product_id), p.unit_label)})
                     </option>
                   ))}
                 </select>
@@ -1364,7 +1875,7 @@ export const InventoryPage: React.FC = () => {
                     ) : (
                       selectedMovementBatches.map((b) => (
                         <option key={b.batch_id} value={b.batch_id}>
-                          {b.batch_number} ({b.qty_on_hand} avail)
+                          {b.batch_number} ({formatQty(b.qty_on_hand)} avail)
                         </option>
                       ))
                     )}
@@ -1376,7 +1887,8 @@ export const InventoryPage: React.FC = () => {
                   </label>
                   <input
                     type="number"
-                    min={1}
+                    min={0.1}
+                    step="0.1"
                     value={movementForm.qty}
                     onChange={(e) =>
                       setMovementForm({ ...movementForm, qty: e.target.value })

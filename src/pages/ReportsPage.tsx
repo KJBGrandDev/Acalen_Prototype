@@ -9,7 +9,7 @@ import {
   XAxis,
   YAxis,
 } from 'recharts';
-import { ArrowRight, Download, FileText } from 'lucide-react';
+import { ArrowRight, ClipboardList, Download, FileText } from 'lucide-react';
 import { useAcalen } from '../context/AcalenContext';
 import {
   REFERENCE_TODAY,
@@ -21,14 +21,17 @@ import {
   getEarliestActiveBatch,
   getExpiryStatus,
   getProductStock,
+  resolveEffectiveRule,
 } from '../engine/acalenEngine';
 import { PriorityPill } from '../components/StatusBadge';
 import { AdvisoryReviewModal } from '../components/AdvisoryReviewModal';
+import { AuditLogModal } from '../components/AuditLogModal';
 
 export const ReportsPage: React.FC = () => {
   const {
     products,
     batches,
+    groupPolicies,
     rules,
     stockMovements,
     orders,
@@ -43,6 +46,7 @@ export const ReportsPage: React.FC = () => {
   const [reportType, setReportType] = useState<string>('ALL');
   const [catFilter, setCatFilter] = useState<string>('ALL');
   const [reviewOpen, setReviewOpen] = useState(false);
+  const [auditOpen, setAuditOpen] = useState(false);
 
   // Live session wastage added on top of 7-day baseline (18 units / ₱1,260)
   const {
@@ -118,12 +122,14 @@ export const ReportsPage: React.FC = () => {
     let expUnits = 0;
     for (const p of products) {
       const r = rules.find((x) => x.product_id === p.product_id);
+      const eff = resolveEffectiveRule(p, r, groupPolicies);
       const b = getEarliestActiveBatch(batches, p.product_id);
       if (b && b.qty_on_hand > 0) {
         const st = getExpiryStatus(
           b.expiration_date,
-          r?.expiry_warning_days ?? 7,
-          REFERENCE_TODAY
+          eff.expiry_warning_days,
+          REFERENCE_TODAY,
+          p.is_perishable
         );
         if (st === 'EXPIRING_SOON' || st === 'EXPIRED') {
           expBatches += 1;
@@ -160,6 +166,7 @@ export const ReportsPage: React.FC = () => {
     stockMovements,
     products,
     batches,
+    groupPolicies,
     rules,
     catFilter,
     dateRange,
@@ -276,22 +283,31 @@ export const ReportsPage: React.FC = () => {
             </select>
           </div>
 
-          <div className="flex gap-2 md:col-span-3">
+          <div className="flex flex-wrap gap-2 md:col-span-3">
             <button
               type="button"
               onClick={handleGenerateReport}
-              className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-lg bg-[#1E325C] px-3.5 py-2 text-xs font-semibold text-white hover:bg-[#162647]"
+              className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-lg bg-[#1E325C] px-3 py-2 text-xs font-semibold text-white hover:bg-[#162647]"
             >
               <FileText className="h-3.5 w-3.5" />
-              Generate Report
+              Generate
             </button>
             <button
               type="button"
               onClick={handleExportCsv}
-              className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-[#E2E8F0] bg-white px-3.5 py-2 text-xs font-semibold text-[#111827] hover:bg-[#F3F4F6]"
+              className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-[#E2E8F0] bg-white px-3 py-2 text-xs font-semibold text-[#111827] hover:bg-[#F3F4F6]"
             >
               <Download className="h-3.5 w-3.5" />
               Export
+            </button>
+            <button
+              type="button"
+              onClick={() => setAuditOpen(true)}
+              className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-[#D8E1EE] bg-[#EFF3F9] px-3 py-2 text-xs font-semibold text-[#1E325C] hover:bg-[#E2EAF5]"
+              title="View RA 10173 Audit & Activity Log"
+            >
+              <ClipboardList className="h-3.5 w-3.5" />
+              Audit
             </button>
           </div>
         </div>
@@ -628,6 +644,7 @@ export const ReportsPage: React.FC = () => {
       </div>
 
       <AdvisoryReviewModal open={reviewOpen} onClose={() => setReviewOpen(false)} />
+      <AuditLogModal open={auditOpen} onClose={() => setAuditOpen(false)} />
     </div>
   );
 };

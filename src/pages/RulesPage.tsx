@@ -1,60 +1,101 @@
 import React, { useMemo, useState } from 'react';
 import {
-  AlertCircle,
   CheckCircle2,
   Clock,
+  Coffee,
+  Layers,
   Pencil,
-  Percent,
+  RotateCcw,
   ShieldAlert,
+  ShieldCheck,
   SlidersHorizontal,
+  Sparkles,
   X,
 } from 'lucide-react';
 import { useAcalen } from '../context/AcalenContext';
-import { CATEGORIES } from '../data/seedData';
+import { CATEGORIES, REFERENCE_TODAY } from '../data/seedData';
 import {
+  evaluateSingleProductRule,
   formatPeso,
+  formatQty,
   getGrossMarginPct,
   getProductStock,
+  resolveEffectiveRule,
 } from '../engine/acalenEngine';
 import { RuleCodeBadge } from '../components/StatusBadge';
-import { BusinessRule } from '../types/acalen';
+import {
+  EffectiveRule,
+  GroupRulePolicy,
+  ProductItemType,
+} from '../types/acalen';
 
 export const RulesPage: React.FC = () => {
   const {
     products,
     batches,
+    groupPolicies,
     rules,
+    forecasts,
+    derivedIngredientForecasts,
     recommendations,
+    updateGroupPolicy,
     updateBusinessRule,
   } = useAcalen();
 
+  const [itemTypeTab, setItemTypeTab] = useState<ProductItemType>('FINISHED_PRODUCT');
   const [search, setSearch] = useState('');
   const [catFilter, setCatFilter] = useState('ALL');
+
+  // Group Policy Editor Modal
+  const [editingGroup, setEditingGroup] = useState<GroupRulePolicy | null>(null);
+  const [groupForm, setGroupForm] = useState({
+    reorder_level: '20',
+    safety_stock: '15',
+    target_margin_pct: '55',
+    expiry_warning_days: '7',
+    markdown_pct: '20',
+    min_post_markdown_margin_pct: '35',
+    enable_stock_rule: true,
+    enable_margin_rule: true,
+    enable_expiry_rule: true,
+    suppress_reorder_on_expiry_surplus: true,
+  });
+
+  // Per-Product Policy Editor Modal (Supports Group Default vs Custom Override + Live IF-THEN Preview)
   const [editingProductId, setEditingProductId] = useState<number | null>(null);
+  const [useGroupDefault, setUseGroupDefault] = useState(true);
   const [editValues, setEditValues] = useState({
     reorder_level: '20',
     safety_stock: '10',
-    target_margin_pct: '35',
+    target_margin_pct: '55',
     expiry_warning_days: '7',
     markdown_pct: '20',
+    min_post_markdown_margin_pct: '35',
+    enable_stock_rule: true,
+    enable_margin_rule: true,
+    enable_expiry_rule: true,
+    suppress_reorder_on_expiry_surplus: true,
   });
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
-  const rows = useMemo(() => {
+  const enrichedRows = useMemo(() => {
     return products
       .map((product) => {
         const rule = rules.find((r) => r.product_id === product.product_id);
+        const eff = resolveEffectiveRule(product, rule, groupPolicies);
         const stock = getProductStock(batches, product.product_id);
         const margin = getGrossMarginPct(
           product.unit_cost,
           product.markdown_price ?? product.selling_price
         );
-        const rec = recommendations.find(
-          (r) => r.product_id === product.product_id
+        const rec = recommendations.find((r) => r.product_id === product.product_id);
+        const derived = derivedIngredientForecasts.find(
+          (d) => d.ingredient_id === product.product_id
         );
-        return { product, rule, stock, margin, rec };
+        return { product, rule, eff, stock, margin, rec, derived };
       })
       .filter((row) => {
+        if (row.product.item_type !== itemTypeTab) return false;
         if (catFilter !== 'ALL' && row.product.category_name !== catFilter) {
           return false;
         }
@@ -67,39 +108,56 @@ export const RulesPage: React.FC = () => {
         }
         return true;
       });
-  }, [products, rules, batches, recommendations, catFilter, search]);
+  }, [
+    products,
+    rules,
+    groupPolicies,
+    batches,
+    recommendations,
+    derivedIngredientForecasts,
+    itemTypeTab,
+    catFilter,
+    search,
+  ]);
 
-  const activeAlertsCount = recommendations.filter(
-    (r) => r.status === 'PENDING'
-  ).length;
+  const policyStats = useMemo(() => {
+    const activeAlerts = recommendations.filter((r) => r.status === 'PENDING').length;
+    const inheritingCount = rules.filter((r) => r.use_group_default).length;
+    const overrideCount = rules.length - inheritingCount;
+    return {
+      groupCount: groupPolicies.length,
+      inheritingCount,
+      overrideCount,
+      activeAlerts,
+    };
+  }, [groupPolicies, rules, recommendations]);
 
-  const avgMarginFloor = useMemo(() => {
-    if (rules.length === 0) return 30;
-    const sum = rules.reduce((s, r) => s + r.target_margin_pct, 0);
-    return Math.round(sum / rules.length);
-  }, [rules]);
-
-  const openEditor = (productId: number, rule: BusinessRule) => {
+  const openGroupEditor = (policy: GroupRulePolicy) => {
     setErrorMsg(null);
-    setEditingProductId(productId);
-    setEditValues({
-      reorder_level: String(rule.reorder_level),
-      safety_stock: String(rule.safety_stock),
-      target_margin_pct: String(rule.target_margin_pct),
-      expiry_warning_days: String(rule.expiry_warning_days),
-      markdown_pct: String(rule.markdown_pct),
+    setEditingGroup(policy);
+    setGroupForm({
+      reorder_level: String(policy.reorder_level),
+      safety_stock: String(policy.safety_stock),
+      target_margin_pct: String(policy.target_margin_pct),
+      expiry_warning_days: String(policy.expiry_warning_days),
+      markdown_pct: String(policy.markdown_pct),
+      min_post_markdown_margin_pct: String(policy.min_post_markdown_margin_pct),
+      enable_stock_rule: policy.enable_stock_rule,
+      enable_margin_rule: policy.enable_margin_rule,
+      enable_expiry_rule: policy.enable_expiry_rule,
+      suppress_reorder_on_expiry_surplus: policy.suppress_reorder_on_expiry_surplus,
     });
   };
 
-  const handleSave = (e: React.FormEvent) => {
+  const handleGroupSave = (e: React.FormEvent) => {
     e.preventDefault();
-    if (editingProductId === null) return;
-
-    const reorder = Number(editValues.reorder_level);
-    const safety = Number(editValues.safety_stock);
-    const margin = Number(editValues.target_margin_pct);
-    const expiryDays = Number(editValues.expiry_warning_days);
-    const markdown = Number(editValues.markdown_pct);
+    if (!editingGroup) return;
+    const reorder = Number(groupForm.reorder_level);
+    const safety = Number(groupForm.safety_stock);
+    const margin = Number(groupForm.target_margin_pct);
+    const expiryDays = Number(groupForm.expiry_warning_days);
+    const markdown = Number(groupForm.markdown_pct);
+    const minMargin = Number(groupForm.min_post_markdown_margin_pct);
 
     if (
       reorder < 0 ||
@@ -108,7 +166,159 @@ export const RulesPage: React.FC = () => {
       margin >= 95 ||
       expiryDays < 1 ||
       markdown < 0 ||
-      markdown >= 80
+      markdown >= 80 ||
+      minMargin < 0 ||
+      minMargin >= 90
+    ) {
+      setErrorMsg('Please enter valid non-negative thresholds within bounds.');
+      return;
+    }
+
+    updateGroupPolicy(editingGroup.category_name, {
+      reorder_level: reorder,
+      safety_stock: safety,
+      target_margin_pct: margin,
+      expiry_warning_days: expiryDays,
+      markdown_pct: markdown,
+      min_post_markdown_margin_pct: minMargin,
+      enable_stock_rule: groupForm.enable_stock_rule,
+      enable_margin_rule: groupForm.enable_margin_rule,
+      enable_expiry_rule: groupForm.enable_expiry_rule,
+      suppress_reorder_on_expiry_surplus: groupForm.suppress_reorder_on_expiry_surplus,
+    });
+    setEditingGroup(null);
+  };
+
+  const openProductEditor = (productId: number) => {
+    setErrorMsg(null);
+    const prod = products.find((p) => p.product_id === productId);
+    const rule = rules.find((r) => r.product_id === productId);
+    if (!prod || !rule) return;
+    const eff = resolveEffectiveRule(prod, rule, groupPolicies);
+
+    setEditingProductId(productId);
+    setUseGroupDefault(rule.use_group_default);
+    setEditValues({
+      reorder_level: String(eff.reorder_level),
+      safety_stock: String(eff.safety_stock),
+      target_margin_pct: String(eff.target_margin_pct),
+      expiry_warning_days: String(eff.expiry_warning_days),
+      markdown_pct: String(eff.markdown_pct),
+      min_post_markdown_margin_pct: String(eff.min_post_markdown_margin_pct),
+      enable_stock_rule: eff.enable_stock_rule,
+      enable_margin_rule: eff.enable_margin_rule,
+      enable_expiry_rule: eff.enable_expiry_rule,
+      suppress_reorder_on_expiry_surplus: eff.suppress_reorder_on_expiry_surplus,
+    });
+  };
+
+  const editingProduct = editingProductId
+    ? products.find((p) => p.product_id === editingProductId) ?? null
+    : null;
+
+  const editingGroupPolicyForProduct = editingProduct
+    ? groupPolicies.find((g) => g.category_name === editingProduct.category_name) ?? null
+    : null;
+
+  const handleToggleGroupInheritance = (inherit: boolean) => {
+    setUseGroupDefault(inherit);
+    if (inherit && editingGroupPolicyForProduct && editingProduct) {
+      const isFin = editingProduct.item_type === 'FINISHED_PRODUCT';
+      setEditValues({
+        reorder_level: String(editingGroupPolicyForProduct.reorder_level),
+        safety_stock: String(editingGroupPolicyForProduct.safety_stock),
+        target_margin_pct: String(editingGroupPolicyForProduct.target_margin_pct),
+        expiry_warning_days: String(editingGroupPolicyForProduct.expiry_warning_days),
+        markdown_pct:
+          isFin && editingProduct.is_perishable
+            ? String(editingGroupPolicyForProduct.markdown_pct)
+            : '0',
+        min_post_markdown_margin_pct: String(
+          editingGroupPolicyForProduct.min_post_markdown_margin_pct
+        ),
+        enable_stock_rule: editingGroupPolicyForProduct.enable_stock_rule,
+        enable_margin_rule: isFin ? editingGroupPolicyForProduct.enable_margin_rule : false,
+        enable_expiry_rule: editingProduct.is_perishable
+          ? editingGroupPolicyForProduct.enable_expiry_rule
+          : false,
+        suppress_reorder_on_expiry_surplus:
+          editingGroupPolicyForProduct.suppress_reorder_on_expiry_surplus,
+      });
+    }
+  };
+
+  // Live What-If Diagnostic Preview computed on every keystroke!
+  const liveWhatIfDiagnostic = useMemo(() => {
+    if (!editingProduct) return null;
+    const isFin = editingProduct.item_type === 'FINISHED_PRODUCT';
+    const previewRule: EffectiveRule = {
+      source: useGroupDefault ? 'GROUP_DEFAULT' : 'CUSTOM_OVERRIDE',
+      group_name: editingProduct.category_name,
+      reorder_level: Number(editValues.reorder_level) || 0,
+      safety_stock: Number(editValues.safety_stock) || 0,
+      target_margin_pct: Number(editValues.target_margin_pct) || 0,
+      expiry_warning_days: Math.max(1, Number(editValues.expiry_warning_days) || 1),
+      markdown_pct:
+        isFin && editingProduct.is_perishable
+          ? Number(editValues.markdown_pct) || 0
+          : 0,
+      min_post_markdown_margin_pct:
+        Number(editValues.min_post_markdown_margin_pct) || 35,
+      enable_stock_rule: editValues.enable_stock_rule,
+      enable_margin_rule: isFin ? editValues.enable_margin_rule : false,
+      enable_expiry_rule: editingProduct.is_perishable
+        ? editValues.enable_expiry_rule
+        : false,
+      suppress_reorder_on_expiry_surplus:
+        editValues.suppress_reorder_on_expiry_surplus,
+    };
+
+    const predicted7d = isFin
+      ? forecasts.find((f) => f.product_id === editingProduct.product_id)?.predicted_7d ??
+        20
+      : derivedIngredientForecasts.find(
+          (d) => d.ingredient_id === editingProduct.product_id
+        )?.derived_7d_usage ?? 10;
+
+    return evaluateSingleProductRule(
+      editingProduct,
+      batches,
+      previewRule,
+      predicted7d,
+      1,
+      undefined,
+      REFERENCE_TODAY
+    );
+  }, [
+    editingProduct,
+    useGroupDefault,
+    editValues,
+    forecasts,
+    derivedIngredientForecasts,
+    batches,
+  ]);
+
+  const handleProductSave = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingProduct) return;
+
+    const reorder = Number(editValues.reorder_level);
+    const safety = Number(editValues.safety_stock);
+    const margin = Number(editValues.target_margin_pct);
+    const expiryDays = Number(editValues.expiry_warning_days);
+    const markdown = Number(editValues.markdown_pct);
+    const minMargin = Number(editValues.min_post_markdown_margin_pct);
+
+    if (
+      reorder < 0 ||
+      safety < 0 ||
+      margin <= 0 ||
+      margin >= 95 ||
+      expiryDays < 1 ||
+      markdown < 0 ||
+      markdown >= 80 ||
+      minMargin < 0 ||
+      minMargin >= 90
     ) {
       setErrorMsg(
         'Ensure reorder/safety >= 0, target margin 1–94%, expiry days >= 1, and markdown 0–79%.'
@@ -116,19 +326,22 @@ export const RulesPage: React.FC = () => {
       return;
     }
 
-    updateBusinessRule(editingProductId, {
+    updateBusinessRule(editingProduct.product_id, {
+      use_group_default: useGroupDefault,
       reorder_level: reorder,
       safety_stock: safety,
       target_margin_pct: margin,
       expiry_warning_days: expiryDays,
       markdown_pct: markdown,
+      min_post_markdown_margin_pct: minMargin,
+      enable_stock_rule: editValues.enable_stock_rule,
+      enable_margin_rule: editValues.enable_margin_rule,
+      enable_expiry_rule: editValues.enable_expiry_rule,
+      suppress_reorder_on_expiry_surplus:
+        editValues.suppress_reorder_on_expiry_surplus,
     });
     setEditingProductId(null);
   };
-
-  const editingProduct = editingProductId
-    ? products.find((p) => p.product_id === editingProductId)
-    : null;
 
   return (
     <div className="space-y-6">
@@ -137,47 +350,47 @@ export const RulesPage: React.FC = () => {
         <div className="acalen-card p-5">
           <div className="flex items-start justify-between">
             <span className="text-xs font-medium text-[#6B7280]">
-              Configured Rule Sets
+              Category Group Policies
             </span>
             <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-[#EFF3F9] text-[#1E325C]">
               <SlidersHorizontal className="h-4 w-4" />
             </span>
           </div>
           <p className="mt-3 text-3xl font-bold text-[#111827] tabular-nums">
-            {rules.length}
+            {policyStats.groupCount}
           </p>
-          <p className="mt-1 text-xs text-[#6B7280]">5 rule parameters per product</p>
+          <p className="mt-1 text-xs text-[#6B7280]">Shared category defaults</p>
         </div>
 
         <div className="acalen-card p-5">
           <div className="flex items-start justify-between">
             <span className="text-xs font-medium text-[#6B7280]">
-              Avg Target Margin Floor
+              Inheriting Group Policy
             </span>
-            <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-[#EFF3F9] text-[#1E325C]">
-              <Percent className="h-4 w-4" />
+            <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-[#ECFDF3] text-[#15803D]">
+              <ShieldCheck className="h-4 w-4" />
             </span>
           </div>
           <p className="mt-3 text-3xl font-bold text-[#111827] tabular-nums">
-            {avgMarginFloor}%
+            {policyStats.inheritingCount}
           </p>
-          <p className="mt-1 text-xs text-[#6B7280]">Minimum default &gt;30% policy</p>
+          <p className="mt-1 text-xs text-[#15803D]">Auto-synced on group edit</p>
         </div>
 
         <div className="acalen-card p-5">
           <div className="flex items-start justify-between">
             <span className="text-xs font-medium text-[#6B7280]">
-              Expiry Warning Window
+              Custom Product Overrides
             </span>
             <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-[#FFF8EB] text-[#D97706]">
-              <Clock className="h-4 w-4" />
+              <Pencil className="h-4 w-4" />
             </span>
           </div>
           <p className="mt-3 text-3xl font-bold text-[#111827] tabular-nums">
-            &le; 7 Days
+            {policyStats.overrideCount}
           </p>
           <p className="mt-1 text-xs font-medium text-[#B4690E]">
-            FEFO near-expiry detection
+            Follows own policy thresholds
           </p>
         </div>
 
@@ -191,7 +404,7 @@ export const RulesPage: React.FC = () => {
             </span>
           </div>
           <p className="mt-3 text-3xl font-bold text-[#111827] tabular-nums">
-            {activeAlertsCount}
+            {policyStats.activeAlerts}
           </p>
           <p className="mt-1 text-xs font-medium text-[#C53030]">
             Pending manager approval
@@ -199,55 +412,181 @@ export const RulesPage: React.FC = () => {
         </div>
       </div>
 
-      {/* Deterministic Engine Explainer Strip */}
-      <div className="acalen-card flex flex-wrap items-center justify-between gap-4 border-l-4 border-l-[#1E325C] p-4">
-        <div className="flex items-start gap-3">
-          <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-[#1E325C]" />
-          <div className="text-xs">
-            <p className="font-semibold text-[#111827]">
-              No-Code Rule Configuration (SIA 1 Sec. 1.5)
-            </p>
-            <p className="mt-0.5 text-[#6B7280]">
-              Adjusting any product&apos;s reorder level, safety stock, target gross
-              margin, expiry warning days, or markdown percentage immediately re-evaluates
-              Acalen&apos;s IF-THEN decision layer without altering source code.
+      {/* Group / Category Default Policies Section */}
+      <div className="acalen-card p-5">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h2 className="text-base font-semibold text-[#111827]">
+              Group / Category Policies (Tier 1 Defaults)
+            </h2>
+            <p className="mt-0.5 text-xs text-[#6B7280]">
+              Edit a group policy once to update all inheriting items in that category; products with a{' '}
+              <strong className="text-[#1E325C]">Custom Override</strong> follow their own policy instead.
             </p>
           </div>
+          <div className="flex flex-wrap gap-2 text-[11px] text-[#334E7B]">
+            <span className="rounded-md bg-[#EEF2F7] px-2.5 py-1 font-medium">
+              Guardrail 1: Expiry Surplus Suppresses Reorder
+            </span>
+            <span className="rounded-md bg-[#EEF2F7] px-2.5 py-1 font-medium">
+              Guardrail 2: Markdown Floor ≥ 35% Margin
+            </span>
+          </div>
+        </div>
+
+        <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          {groupPolicies.map((gp) => {
+            const members = products.filter(
+              (p) => p.category_name === gp.category_name
+            );
+            const inheriting = members.filter((p) => {
+              const r = rules.find((x) => x.product_id === p.product_id);
+              return r?.use_group_default ?? true;
+            }).length;
+            const customCount = members.length - inheriting;
+
+            return (
+              <div
+                key={gp.category_name}
+                className="flex flex-col justify-between rounded-xl border border-[#E8ECF2] bg-[#F9FAFB] p-3.5"
+              >
+                <div>
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-sm font-bold text-[#111827]">
+                      {gp.category_name}
+                    </span>
+                    <span
+                      className={`rounded px-1.5 py-0.5 text-[10px] font-semibold ${
+                        gp.item_type === 'FINISHED_PRODUCT'
+                          ? 'bg-[#EFF3F9] text-[#1E325C]'
+                          : 'bg-[#E5E7EB] text-[#374151]'
+                      }`}
+                    >
+                      {gp.item_type === 'FINISHED_PRODUCT' ? 'Menu Group' : 'Raw / Supply'}
+                    </span>
+                  </div>
+
+                  <div className="mt-2.5 grid grid-cols-2 gap-x-2 gap-y-1 text-[11px] text-[#4B5563]">
+                    <span>
+                      Reorder: <strong className="text-[#111827]">{gp.reorder_level}</strong>
+                    </span>
+                    <span>
+                      Safety: <strong className="text-[#111827]">{gp.safety_stock}</strong>
+                    </span>
+                    {gp.enable_margin_rule ? (
+                      <span>
+                        Margin: <strong className="text-[#111827]">{gp.target_margin_pct}%</strong>
+                      </span>
+                    ) : (
+                      <span className="text-[#9CA3AF]">Margin: N/A</span>
+                    )}
+                    {gp.enable_expiry_rule ? (
+                      <span>
+                        Expiry: <strong className="text-[#111827]">≤{gp.expiry_warning_days}d</strong>
+                      </span>
+                    ) : (
+                      <span className="text-[#9CA3AF]">Expiry: Off</span>
+                    )}
+                    {gp.item_type === 'FINISHED_PRODUCT' && (
+                      <span className="col-span-2">
+                        Clearance Markdown:{' '}
+                        <strong className="text-[#111827]">{gp.markdown_pct}%</strong>{' '}
+                        <span className="text-[#9CA3AF]">
+                          (floor {gp.min_post_markdown_margin_pct}%)
+                        </span>
+                      </span>
+                    )}
+                  </div>
+                </div>
+
+                <div className="mt-3 flex items-center justify-between border-t border-[#E8ECF2] pt-2.5 text-[11px]">
+                  <span className="text-[#6B7280] tabular-nums">
+                    {inheriting} inherit · {customCount} custom
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => openGroupEditor(gp)}
+                    className="font-semibold text-[#1E325C] hover:underline"
+                  >
+                    Configure Group
+                  </button>
+                </div>
+              </div>
+            );
+          })}
         </div>
       </div>
 
-      {/* Filters */}
-      <div className="flex flex-wrap items-center gap-3">
-        <input
-          type="text"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          placeholder="Search product or SKU..."
-          className="w-full max-w-sm rounded-xl border border-[#E8ECF2] bg-white px-4 py-2.5 text-xs text-[#111827] placeholder-[#9CA3AF] shadow-xs focus:border-[#1E325C] focus:outline-none"
-        />
-        <select
-          value={catFilter}
-          onChange={(e) => setCatFilter(e.target.value)}
-          aria-label="Filter rules by category"
-          className="rounded-xl border border-[#E8ECF2] bg-white px-3.5 py-2.5 text-xs text-[#374151] shadow-xs focus:border-[#1E325C] focus:outline-none"
-        >
-          <option value="ALL">All Categories</option>
-          {CATEGORIES.map((c) => (
-            <option key={c.category_id} value={c.category_name}>
-              {c.category_name}
-            </option>
-          ))}
-        </select>
+      {/* Separated Product Rule Policies Tabs + Filters */}
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="inline-flex rounded-xl border border-[#E8ECF2] bg-white p-1 shadow-xs">
+          <button
+            type="button"
+            onClick={() => setItemTypeTab('FINISHED_PRODUCT')}
+            className={`inline-flex items-center gap-2 rounded-lg px-4 py-2 text-xs font-semibold ${
+              itemTypeTab === 'FINISHED_PRODUCT'
+                ? 'bg-[#1E325C] text-white'
+                : 'text-[#6B7280] hover:text-[#111827]'
+            }`}
+          >
+            <Coffee className="h-3.5 w-3.5" />
+            Finished Products
+          </button>
+          <button
+            type="button"
+            onClick={() => setItemTypeTab('RAW_INGREDIENT')}
+            className={`inline-flex items-center gap-2 rounded-lg px-4 py-2 text-xs font-semibold ${
+              itemTypeTab === 'RAW_INGREDIENT'
+                ? 'bg-[#1E325C] text-white'
+                : 'text-[#6B7280] hover:text-[#111827]'
+            }`}
+          >
+            <Layers className="h-3.5 w-3.5" />
+            Raw Ingredients &amp; Supplies
+          </button>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2.5">
+          <input
+            type="text"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search product or SKU..."
+            className="w-56 rounded-xl border border-[#E8ECF2] bg-white px-3.5 py-2 text-xs text-[#111827] placeholder-[#9CA3AF] shadow-xs focus:border-[#1E325C] focus:outline-none"
+          />
+          <select
+            value={catFilter}
+            onChange={(e) => setCatFilter(e.target.value)}
+            aria-label="Filter rules by category"
+            className="rounded-xl border border-[#E8ECF2] bg-white px-3 py-2 text-xs text-[#374151] shadow-xs focus:border-[#1E325C] focus:outline-none"
+          >
+            <option value="ALL">All Categories</option>
+            {CATEGORIES.map((c) => (
+              <option key={c.category_id} value={c.category_name}>
+                {c.category_name}
+              </option>
+            ))}
+          </select>
+        </div>
       </div>
 
-      {/* Rule Thresholds Table */}
+      {/* Product Rule Thresholds Table (Tailored columns per Raw vs Finished!) */}
       <div className="acalen-card overflow-hidden">
         <div className="flex items-center justify-between border-b border-[#E8ECF2] px-6 py-4">
-          <h2 className="text-base font-semibold text-[#111827]">
-            Per-Product Rule Thresholds
-          </h2>
+          <div>
+            <h2 className="text-base font-semibold text-[#111827]">
+              {itemTypeTab === 'FINISHED_PRODUCT'
+                ? 'Finished Product Rule Policies (Tier 2)'
+                : 'Raw Ingredient & Supply Rule Policies (Tier 2)'}
+            </h2>
+            <p className="text-xs text-[#6B7280]">
+              {itemTypeTab === 'FINISHED_PRODUCT'
+                ? 'Evaluates stock, target gross margin %, and near-expiry retail markdown %'
+                : 'Evaluates BOM-derived 7d consumption & FEFO expiry rotation (POS retail markdowns disabled)'}
+            </p>
+          </div>
           <span className="text-xs text-[#6B7280] tabular-nums">
-            {rows.length} configured products
+            {enrichedRows.length} items
           </span>
         </div>
 
@@ -256,113 +595,175 @@ export const RulesPage: React.FC = () => {
             <thead className="border-b border-[#E8ECF2] bg-[#F9FAFB] text-[11px] font-medium text-[#6B7280]">
               <tr>
                 <th className="px-6 py-3.5">Product</th>
-                <th className="px-4 py-3.5">Current Stock</th>
-                <th className="px-4 py-3.5">Reorder Level</th>
-                <th className="px-4 py-3.5">Safety Stock</th>
-                <th className="px-4 py-3.5">Margin / Target</th>
-                <th className="px-4 py-3.5">Expiry Warn</th>
-                <th className="px-4 py-3.5">Markdown %</th>
+                <th className="px-4 py-3.5">Policy Source</th>
+                <th className="px-4 py-3.5">Stock / Reorder / Safety</th>
+                {itemTypeTab === 'FINISHED_PRODUCT' ? (
+                  <>
+                    <th className="px-4 py-3.5">Margin / Target</th>
+                    <th className="px-4 py-3.5">Expiry Warn</th>
+                    <th className="px-4 py-3.5">Markdown %</th>
+                  </>
+                ) : (
+                  <>
+                    <th className="px-4 py-3.5">Derived 7d BOM Usage</th>
+                    <th className="px-4 py-3.5">Expiry Warn</th>
+                  </>
+                )}
                 <th className="px-4 py-3.5">Rule Evaluation</th>
                 <th className="px-6 py-3.5 text-right">Edit</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-[#F1F5F9]">
-              {rows.map(({ product, rule, stock, margin, rec }) => {
-                if (!rule) return null;
-                return (
-                  <tr key={product.product_id} className="hover:bg-[#F9FAFB]">
-                    <td className="px-6 py-3.5">
-                      <p className="font-semibold text-[#111827]">
-                        {product.product_name}
-                      </p>
-                      <p className="text-[11px] text-[#9CA3AF]">
-                        {product.sku} · Cost {formatPeso(product.unit_cost)} / Price{' '}
-                        {formatPeso(product.selling_price)}
-                      </p>
-                    </td>
-                    <td className="px-4 py-3.5 font-semibold text-[#111827] tabular-nums">
-                      {stock} {product.unit_label}
-                    </td>
-                    <td className="px-4 py-3.5 tabular-nums">
-                      {rule.reorder_level} {product.unit_label}
-                    </td>
-                    <td className="px-4 py-3.5 tabular-nums">
-                      {rule.safety_stock} {product.unit_label}
-                    </td>
-                    <td className="px-4 py-3.5 tabular-nums">
-                      <span
-                        className={`font-semibold ${
-                          product.sellable_on_pos && margin < rule.target_margin_pct
-                            ? 'text-[#C53030]'
-                            : 'text-[#15803D]'
-                        }`}
-                      >
-                        {margin.toFixed(1)}%
-                      </span>{' '}
-                      <span className="text-[#9CA3AF]">/ {rule.target_margin_pct}%</span>
-                    </td>
-                    <td className="px-4 py-3.5 tabular-nums">
-                      &le; {rule.expiry_warning_days}d
-                    </td>
-                    <td className="px-4 py-3.5 tabular-nums">{rule.markdown_pct}%</td>
-                    <td className="px-4 py-3.5">
-                      {rec ? (
-                        <div className="flex flex-wrap gap-1">
-                          {rec.all_rules_triggered.map((code) => (
-                            <RuleCodeBadge key={code} code={code} />
-                          ))}
-                        </div>
-                      ) : (
-                        <span className="inline-flex items-center gap-1 rounded-full bg-[#ECFDF3] px-2.5 py-0.5 text-[11px] font-medium text-[#15803D]">
-                          <CheckCircle2 className="h-3 w-3" />
-                          Healthy
+              {enrichedRows.map(({ product, eff, stock, margin, rec, derived }) => (
+                <tr key={product.product_id} className="hover:bg-[#F9FAFB]">
+                  <td className="px-6 py-3.5">
+                    <p className="font-semibold text-[#111827]">{product.product_name}</p>
+                    <p className="text-[11px] text-[#9CA3AF]">
+                      {product.sku} · Cost {formatPeso(product.unit_cost)}
+                      {itemTypeTab === 'FINISHED_PRODUCT' &&
+                        ` / Price ${formatPeso(product.selling_price)}`}
+                    </p>
+                  </td>
+                  <td className="px-4 py-3.5">
+                    {eff.source === 'GROUP_DEFAULT' ? (
+                      <span className="inline-flex items-center rounded-md bg-[#EEF2F7] px-2 py-0.5 text-[11px] font-medium text-[#334E7B]">
+                        Inherits {eff.group_name}
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center rounded-md border border-[#FDE68A] bg-[#FFF8EB] px-2 py-0.5 text-[11px] font-semibold text-[#B4690E]">
+                        Custom Override
+                      </span>
+                    )}
+                  </td>
+                  <td className="px-4 py-3.5 tabular-nums">
+                    <span className="font-bold text-[#111827]">
+                      {formatQty(stock, product.unit_label)}
+                    </span>
+                    <span className="block text-[11px] text-[#6B7280]">
+                      R: {eff.reorder_level} · S: {eff.safety_stock}
+                    </span>
+                  </td>
+
+                  {itemTypeTab === 'FINISHED_PRODUCT' ? (
+                    <>
+                      <td className="px-4 py-3.5 tabular-nums">
+                        {eff.enable_margin_rule ? (
+                          <>
+                            <span
+                              className={`font-semibold ${
+                                margin < eff.target_margin_pct
+                                  ? 'text-[#C53030]'
+                                  : 'text-[#15803D]'
+                              }`}
+                            >
+                              {margin.toFixed(1)}%
+                            </span>{' '}
+                            <span className="text-[#9CA3AF]">
+                              / {eff.target_margin_pct}%
+                            </span>
+                          </>
+                        ) : (
+                          <span className="text-[#9CA3AF]">Disabled</span>
+                        )}
+                      </td>
+                      <td className="px-4 py-3.5 tabular-nums">
+                        {eff.enable_expiry_rule ? `≤ ${eff.expiry_warning_days}d` : 'Off'}
+                      </td>
+                      <td className="px-4 py-3.5 tabular-nums">
+                        {eff.enable_expiry_rule ? (
+                          <span>
+                            {eff.markdown_pct}%{' '}
+                            <span className="text-[10px] text-[#9CA3AF]">
+                              (≥{eff.min_post_markdown_margin_pct}%)
+                            </span>
+                          </span>
+                        ) : (
+                          '—'
+                        )}
+                      </td>
+                    </>
+                  ) : (
+                    <>
+                      <td className="px-4 py-3.5 tabular-nums">
+                        <span className="font-semibold text-[#1E325C]">
+                          {formatQty(derived?.derived_7d_usage ?? 0, product.unit_label)}
                         </span>
-                      )}
-                    </td>
-                    <td className="px-6 py-3.5 text-right">
-                      <button
-                        type="button"
-                        onClick={() => openEditor(product.product_id, rule)}
-                        className="inline-flex items-center gap-1 rounded-lg border border-[#E2E8F0] bg-white px-2.5 py-1.5 text-[11px] font-semibold text-[#1E325C] hover:bg-[#EFF3F9]"
-                      >
-                        <Pencil className="h-3 w-3" />
-                        Configure
-                      </button>
-                    </td>
-                  </tr>
-                );
-              })}
+                        <span className="block text-[10px] text-[#9CA3AF]">
+                          {derived?.contributing_products.length ?? 0} linked recipe(s)
+                        </span>
+                      </td>
+                      <td className="px-4 py-3.5 tabular-nums">
+                        {product.is_perishable && eff.enable_expiry_rule ? (
+                          <span className="inline-flex items-center gap-1 text-[#374151]">
+                            <Clock className="h-3 w-3 text-[#D97706]" />
+                            ≤ {eff.expiry_warning_days}d
+                          </span>
+                        ) : (
+                          <span className="text-[#9CA3AF]">Non-perishable</span>
+                        )}
+                      </td>
+                    </>
+                  )}
+
+                  <td className="px-4 py-3.5">
+                    {rec ? (
+                      <div className="flex flex-wrap gap-1">
+                        {rec.all_rules_triggered.map((code) => (
+                          <RuleCodeBadge key={code} code={code} />
+                        ))}
+                      </div>
+                    ) : (
+                      <span className="inline-flex items-center gap-1 rounded-full bg-[#ECFDF3] px-2.5 py-0.5 text-[11px] font-medium text-[#15803D]">
+                        <CheckCircle2 className="h-3 w-3" />
+                        Healthy
+                      </span>
+                    )}
+                  </td>
+                  <td className="px-6 py-3.5 text-right">
+                    <button
+                      type="button"
+                      onClick={() => openProductEditor(product.product_id)}
+                      className="inline-flex items-center gap-1 rounded-lg border border-[#E2E8F0] bg-white px-2.5 py-1.5 text-[11px] font-semibold text-[#1E325C] hover:bg-[#EFF3F9]"
+                    >
+                      <Pencil className="h-3 w-3" />
+                      Configure
+                    </button>
+                  </td>
+                </tr>
+              ))}
             </tbody>
           </table>
         </div>
       </div>
 
-      {/* Edit Rule Threshold Modal */}
-      {editingProduct && (
+      {/* Group Policy Editor Modal */}
+      {editingGroup && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/45 p-4"
           role="dialog"
           aria-modal="true"
-          aria-labelledby="edit-rule-title"
+          aria-labelledby="edit-group-title"
         >
-          <div className="w-full max-w-md rounded-2xl border border-[#E8ECF2] bg-white p-6 shadow-2xl">
+          <div className="w-full max-w-lg rounded-2xl border border-[#E8ECF2] bg-white p-6 shadow-2xl">
             <div className="flex items-center justify-between border-b border-[#F1F5F9] pb-3">
               <div>
-                <h2 id="edit-rule-title" className="text-base font-semibold text-[#111827]">
-                  Configure Rules · {editingProduct.product_name}
+                <h2 id="edit-group-title" className="text-base font-semibold text-[#111827]">
+                  Configure Group Policy · {editingGroup.category_name}
                 </h2>
-                <p className="text-xs text-[#6B7280]">{editingProduct.sku}</p>
+                <p className="text-xs text-[#6B7280]">
+                  Updates all inheriting products in {editingGroup.category_name}
+                </p>
               </div>
               <button
                 type="button"
-                onClick={() => setEditingProductId(null)}
+                onClick={() => setEditingGroup(null)}
                 className="rounded p-1 text-[#6B7280] hover:bg-[#F3F4F6]"
               >
                 <X className="h-4 w-4" />
               </button>
             </div>
 
-            <form onSubmit={handleSave} className="mt-4 space-y-3.5 text-xs">
+            <form onSubmit={handleGroupSave} className="mt-4 space-y-4 text-xs">
               {errorMsg && (
                 <p className="rounded-lg bg-[#FEF2F2] p-2.5 text-xs text-[#C53030]">
                   {errorMsg}
@@ -372,35 +773,35 @@ export const RulesPage: React.FC = () => {
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="mb-1 block font-medium text-[#374151]">
-                    Reorder Level ({editingProduct.unit_label})
+                    Default Reorder Level
                   </label>
                   <input
                     type="number"
                     min={0}
-                    value={editValues.reorder_level}
+                    value={groupForm.reorder_level}
                     onChange={(e) =>
-                      setEditValues({ ...editValues, reorder_level: e.target.value })
+                      setGroupForm({ ...groupForm, reorder_level: e.target.value })
                     }
-                    className="w-full rounded-lg border border-[#D1D5DB] px-3 py-2 tabular-nums focus:border-[#1E325C] focus:outline-none"
+                    className="w-full rounded-lg border border-[#D1D5DB] px-3 py-2 tabular-nums"
                   />
                 </div>
                 <div>
                   <label className="mb-1 block font-medium text-[#374151]">
-                    Safety Stock ({editingProduct.unit_label})
+                    Default Safety Stock
                   </label>
                   <input
                     type="number"
                     min={0}
-                    value={editValues.safety_stock}
+                    value={groupForm.safety_stock}
                     onChange={(e) =>
-                      setEditValues({ ...editValues, safety_stock: e.target.value })
+                      setGroupForm({ ...groupForm, safety_stock: e.target.value })
                     }
-                    className="w-full rounded-lg border border-[#D1D5DB] px-3 py-2 tabular-nums focus:border-[#1E325C] focus:outline-none"
+                    className="w-full rounded-lg border border-[#D1D5DB] px-3 py-2 tabular-nums"
                   />
                 </div>
               </div>
 
-              <div className="grid grid-cols-3 gap-3">
+              <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
                 <div>
                   <label className="mb-1 block font-medium text-[#374151]">
                     Target Margin %
@@ -409,14 +810,15 @@ export const RulesPage: React.FC = () => {
                     type="number"
                     min={1}
                     max={94}
-                    value={editValues.target_margin_pct}
+                    disabled={editingGroup.item_type === 'RAW_INGREDIENT'}
+                    value={groupForm.target_margin_pct}
                     onChange={(e) =>
-                      setEditValues({
-                        ...editValues,
+                      setGroupForm({
+                        ...groupForm,
                         target_margin_pct: e.target.value,
                       })
                     }
-                    className="w-full rounded-lg border border-[#D1D5DB] px-3 py-2 tabular-nums focus:border-[#1E325C] focus:outline-none"
+                    className="w-full rounded-lg border border-[#D1D5DB] px-2.5 py-2 tabular-nums disabled:bg-[#F3F4F6]"
                   />
                 </div>
                 <div>
@@ -427,14 +829,14 @@ export const RulesPage: React.FC = () => {
                     type="number"
                     min={1}
                     max={90}
-                    value={editValues.expiry_warning_days}
+                    value={groupForm.expiry_warning_days}
                     onChange={(e) =>
-                      setEditValues({
-                        ...editValues,
+                      setGroupForm({
+                        ...groupForm,
                         expiry_warning_days: e.target.value,
                       })
                     }
-                    className="w-full rounded-lg border border-[#D1D5DB] px-3 py-2 tabular-nums focus:border-[#1E325C] focus:outline-none"
+                    className="w-full rounded-lg border border-[#D1D5DB] px-2.5 py-2 tabular-nums"
                   />
                 </div>
                 <div>
@@ -445,16 +847,460 @@ export const RulesPage: React.FC = () => {
                     type="number"
                     min={0}
                     max={79}
-                    value={editValues.markdown_pct}
+                    disabled={editingGroup.item_type === 'RAW_INGREDIENT'}
+                    value={groupForm.markdown_pct}
                     onChange={(e) =>
-                      setEditValues({ ...editValues, markdown_pct: e.target.value })
+                      setGroupForm({ ...groupForm, markdown_pct: e.target.value })
                     }
-                    className="w-full rounded-lg border border-[#D1D5DB] px-3 py-2 tabular-nums focus:border-[#1E325C] focus:outline-none"
+                    className="w-full rounded-lg border border-[#D1D5DB] px-2.5 py-2 tabular-nums disabled:bg-[#F3F4F6]"
+                  />
+                </div>
+                <div>
+                  <label className="mb-1 block font-medium text-[#374151]">
+                    Margin Floor %
+                  </label>
+                  <input
+                    type="number"
+                    min={0}
+                    max={89}
+                    disabled={editingGroup.item_type === 'RAW_INGREDIENT'}
+                    value={groupForm.min_post_markdown_margin_pct}
+                    onChange={(e) =>
+                      setGroupForm({
+                        ...groupForm,
+                        min_post_markdown_margin_pct: e.target.value,
+                      })
+                    }
+                    className="w-full rounded-lg border border-[#D1D5DB] px-2.5 py-2 tabular-nums disabled:bg-[#F3F4F6]"
                   />
                 </div>
               </div>
 
-              <div className="flex justify-end gap-2 pt-3">
+              <div className="space-y-2 rounded-xl border border-[#E8ECF2] bg-[#F9FAFB] p-3">
+                <p className="text-[11px] font-semibold text-[#374151] uppercase">
+                  Active Rules &amp; Precedence for {editingGroup.category_name}
+                </p>
+                <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                  <label className="flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      checked={groupForm.enable_stock_rule}
+                      onChange={(e) =>
+                        setGroupForm({
+                          ...groupForm,
+                          enable_stock_rule: e.target.checked,
+                        })
+                      }
+                    />
+                    <span>Enable Stock Shortage Rule</span>
+                  </label>
+                  {editingGroup.item_type === 'FINISHED_PRODUCT' && (
+                    <label className="flex items-center gap-2">
+                      <input
+                        type="checkbox"
+                        checked={groupForm.enable_margin_rule}
+                        onChange={(e) =>
+                          setGroupForm({
+                            ...groupForm,
+                            enable_margin_rule: e.target.checked,
+                          })
+                        }
+                      />
+                      <span>Enable Target Margin Rule</span>
+                    </label>
+                  )}
+                  <label className="flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      checked={groupForm.enable_expiry_rule}
+                      onChange={(e) =>
+                        setGroupForm({
+                          ...groupForm,
+                          enable_expiry_rule: e.target.checked,
+                        })
+                      }
+                    />
+                    <span>Enable Expiry Warning Rule</span>
+                  </label>
+                  <label className="flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      checked={groupForm.suppress_reorder_on_expiry_surplus}
+                      onChange={(e) =>
+                        setGroupForm({
+                          ...groupForm,
+                          suppress_reorder_on_expiry_surplus: e.target.checked,
+                        })
+                      }
+                    />
+                    <span>Suppress Reorder on Expiry Surplus</span>
+                  </label>
+                </div>
+              </div>
+
+              <div className="flex justify-end gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setEditingGroup(null)}
+                  className="rounded-lg border border-[#E5E7EB] px-4 py-2 font-medium text-[#4B5563]"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="rounded-lg bg-[#1E325C] px-4 py-2 font-semibold text-white hover:bg-[#162647]"
+                >
+                  Apply to Group
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Upgraded Per-Product Policy Editor + Live Plain-English IF-THEN What-If Preview */}
+      {editingProduct && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/45 p-4"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="edit-rule-title"
+        >
+          <div className="flex max-h-[90vh] w-full max-w-2xl flex-col overflow-hidden rounded-2xl border border-[#E8ECF2] bg-white shadow-2xl">
+            <div className="flex items-center justify-between border-b border-[#F1F5F9] px-6 py-4">
+              <div>
+                <div className="flex items-center gap-2">
+                  <h2 id="edit-rule-title" className="text-base font-semibold text-[#111827]">
+                    Configure Rules · {editingProduct.product_name}
+                  </h2>
+                  <span className="rounded bg-[#EFF3F9] px-2 py-0.5 text-[10px] font-semibold text-[#1E325C]">
+                    {editingProduct.item_type === 'FINISHED_PRODUCT'
+                      ? 'Finished Product'
+                      : 'Raw Ingredient'}
+                  </span>
+                </div>
+                <p className="text-xs text-[#6B7280]">
+                  {editingProduct.sku} · Category: {editingProduct.category_name} · Unit:{' '}
+                  {editingProduct.unit_label}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setEditingProductId(null)}
+                className="rounded p-1 text-[#6B7280] hover:bg-[#F3F4F6]"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <form
+              onSubmit={handleProductSave}
+              className="flex-1 space-y-4 overflow-y-auto p-6 text-xs"
+            >
+              {errorMsg && (
+                <p className="rounded-lg bg-[#FEF2F2] p-2.5 text-xs text-[#C53030]">
+                  {errorMsg}
+                </p>
+              )}
+
+              {/* Policy Mode Switch: Inherit Group vs Custom Override */}
+              <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-[#E8ECF2] bg-[#F8FAFC] p-3.5">
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => handleToggleGroupInheritance(true)}
+                    className={`rounded-lg px-3 py-1.5 text-xs font-semibold ${
+                      useGroupDefault
+                        ? 'bg-[#1E325C] text-white shadow-xs'
+                        : 'border border-[#E2E8F0] bg-white text-[#4B5563]'
+                    }`}
+                  >
+                    Inherit {editingProduct.category_name} Group Policy
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleToggleGroupInheritance(false)}
+                    className={`rounded-lg px-3 py-1.5 text-xs font-semibold ${
+                      !useGroupDefault
+                        ? 'bg-[#B4690E] text-white shadow-xs'
+                        : 'border border-[#E2E8F0] bg-white text-[#4B5563]'
+                    }`}
+                  >
+                    Custom Product Override
+                  </button>
+                </div>
+                {!useGroupDefault && (
+                  <button
+                    type="button"
+                    onClick={() => handleToggleGroupInheritance(true)}
+                    className="inline-flex items-center gap-1 text-[11px] font-semibold text-[#1E325C] hover:underline"
+                  >
+                    <RotateCcw className="h-3 w-3" />
+                    Reset to Group Default
+                  </button>
+                )}
+              </div>
+
+              {/* Numeric Threshold Inputs */}
+              <div
+                className={`space-y-3 rounded-xl border p-4 ${
+                  useGroupDefault
+                    ? 'border-[#E8ECF2] bg-[#F9FAFB]/70'
+                    : 'border-[#FDE68A] bg-[#FFFBEB]/40'
+                }`}
+              >
+                <div className="flex items-center justify-between">
+                  <p className="font-semibold text-[#111827]">
+                    {useGroupDefault
+                      ? `Inherited Thresholds (${editingProduct.category_name} Group)`
+                      : 'Custom Override Thresholds'}
+                  </p>
+                  {useGroupDefault && (
+                    <span className="text-[11px] text-[#6B7280]">
+                      Editing any field switches this item to Custom Override
+                    </span>
+                  )}
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="mb-1 block font-medium text-[#374151]">
+                      Reorder Level ({editingProduct.unit_label})
+                    </label>
+                    <input
+                      type="number"
+                      min={0}
+                      value={editValues.reorder_level}
+                      onChange={(e) => {
+                        setUseGroupDefault(false);
+                        setEditValues({ ...editValues, reorder_level: e.target.value });
+                      }}
+                      className="w-full rounded-lg border border-[#D1D5DB] bg-white px-3 py-2 tabular-nums focus:border-[#1E325C] focus:outline-none"
+                    />
+                  </div>
+                  <div>
+                    <label className="mb-1 block font-medium text-[#374151]">
+                      Safety Stock ({editingProduct.unit_label})
+                    </label>
+                    <input
+                      type="number"
+                      min={0}
+                      value={editValues.safety_stock}
+                      onChange={(e) => {
+                        setUseGroupDefault(false);
+                        setEditValues({ ...editValues, safety_stock: e.target.value });
+                      }}
+                      className="w-full rounded-lg border border-[#D1D5DB] bg-white px-3 py-2 tabular-nums focus:border-[#1E325C] focus:outline-none"
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                  {editingProduct.item_type === 'FINISHED_PRODUCT' && (
+                    <div>
+                      <label className="mb-1 block font-medium text-[#374151]">
+                        Target Margin %
+                      </label>
+                      <input
+                        type="number"
+                        min={1}
+                        max={94}
+                        value={editValues.target_margin_pct}
+                        onChange={(e) => {
+                          setUseGroupDefault(false);
+                          setEditValues({
+                            ...editValues,
+                            target_margin_pct: e.target.value,
+                          });
+                        }}
+                        className="w-full rounded-lg border border-[#D1D5DB] bg-white px-2.5 py-2 tabular-nums focus:border-[#1E325C] focus:outline-none"
+                      />
+                    </div>
+                  )}
+
+                  {editingProduct.is_perishable && (
+                    <div>
+                      <label className="mb-1 block font-medium text-[#374151]">
+                        Expiry Warn (d)
+                      </label>
+                      <input
+                        type="number"
+                        min={1}
+                        max={90}
+                        value={editValues.expiry_warning_days}
+                        onChange={(e) => {
+                          setUseGroupDefault(false);
+                          setEditValues({
+                            ...editValues,
+                            expiry_warning_days: e.target.value,
+                          });
+                        }}
+                        className="w-full rounded-lg border border-[#D1D5DB] bg-white px-2.5 py-2 tabular-nums focus:border-[#1E325C] focus:outline-none"
+                      />
+                    </div>
+                  )}
+
+                  {editingProduct.item_type === 'FINISHED_PRODUCT' &&
+                    editingProduct.is_perishable && (
+                      <>
+                        <div>
+                          <label className="mb-1 block font-medium text-[#374151]">
+                            Markdown %
+                          </label>
+                          <input
+                            type="number"
+                            min={0}
+                            max={79}
+                            value={editValues.markdown_pct}
+                            onChange={(e) => {
+                              setUseGroupDefault(false);
+                              setEditValues({
+                                ...editValues,
+                                markdown_pct: e.target.value,
+                              });
+                            }}
+                            className="w-full rounded-lg border border-[#D1D5DB] bg-white px-2.5 py-2 tabular-nums focus:border-[#1E325C] focus:outline-none"
+                          />
+                        </div>
+                        <div>
+                          <label className="mb-1 block font-medium text-[#374151]">
+                            Margin Floor %
+                          </label>
+                          <input
+                            type="number"
+                            min={0}
+                            max={89}
+                            value={editValues.min_post_markdown_margin_pct}
+                            onChange={(e) => {
+                              setUseGroupDefault(false);
+                              setEditValues({
+                                ...editValues,
+                                min_post_markdown_margin_pct: e.target.value,
+                              });
+                            }}
+                            className="w-full rounded-lg border border-[#D1D5DB] bg-white px-2.5 py-2 tabular-nums focus:border-[#1E325C] focus:outline-none"
+                          />
+                        </div>
+                      </>
+                    )}
+                </div>
+
+                {/* Rule Toggles */}
+                <div className="flex flex-wrap gap-4 pt-1 text-[11px] text-[#374151]">
+                  <label className="flex items-center gap-1.5">
+                    <input
+                      type="checkbox"
+                      checked={editValues.enable_stock_rule}
+                      onChange={(e) => {
+                        setUseGroupDefault(false);
+                        setEditValues({
+                          ...editValues,
+                          enable_stock_rule: e.target.checked,
+                        });
+                      }}
+                    />
+                    Stock Rule
+                  </label>
+                  {editingProduct.item_type === 'FINISHED_PRODUCT' && (
+                    <label className="flex items-center gap-1.5">
+                      <input
+                        type="checkbox"
+                        checked={editValues.enable_margin_rule}
+                        onChange={(e) => {
+                          setUseGroupDefault(false);
+                          setEditValues({
+                            ...editValues,
+                            enable_margin_rule: e.target.checked,
+                          });
+                        }}
+                      />
+                      Margin Rule
+                    </label>
+                  )}
+                  {editingProduct.is_perishable && (
+                    <label className="flex items-center gap-1.5">
+                      <input
+                        type="checkbox"
+                        checked={editValues.enable_expiry_rule}
+                        onChange={(e) => {
+                          setUseGroupDefault(false);
+                          setEditValues({
+                            ...editValues,
+                            enable_expiry_rule: e.target.checked,
+                          });
+                        }}
+                      />
+                      Expiry Rule
+                    </label>
+                  )}
+                  <label className="flex items-center gap-1.5">
+                    <input
+                      type="checkbox"
+                      checked={editValues.suppress_reorder_on_expiry_surplus}
+                      onChange={(e) => {
+                        setUseGroupDefault(false);
+                        setEditValues({
+                          ...editValues,
+                          suppress_reorder_on_expiry_surplus: e.target.checked,
+                        });
+                      }}
+                    />
+                    Hold Reorder on Expiry Surplus
+                  </label>
+                </div>
+              </div>
+
+              {/* Live Plain-English IF-THEN What-If Preview Panel */}
+              {liveWhatIfDiagnostic && (
+                <div className="rounded-xl border border-[#D8E1EE] bg-[#F4F7FC] p-4">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div className="flex items-center gap-2 font-semibold text-[#1E325C]">
+                      <Sparkles className="h-4 w-4" />
+                      <span>Live IF-THEN Rule Evaluation Preview</span>
+                    </div>
+                    <div className="flex flex-wrap gap-1.5">
+                      {liveWhatIfDiagnostic.triggeredCodes.length === 0 ? (
+                        <span className="inline-flex items-center gap-1 rounded-full bg-[#ECFDF3] px-2.5 py-0.5 text-[11px] font-semibold text-[#15803D]">
+                          <CheckCircle2 className="h-3 w-3" />
+                          Healthy (No Alerts)
+                        </span>
+                      ) : (
+                        liveWhatIfDiagnostic.triggeredCodes.map((c) => (
+                          <RuleCodeBadge key={c} code={c} />
+                        ))
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="mt-2.5 space-y-1.5 text-[11px] leading-relaxed text-[#334155]">
+                    <p>
+                      <strong>IF Stock Rule:</strong>{' '}
+                      {liveWhatIfDiagnostic.checks.stockCheckText}
+                    </p>
+                    <p>
+                      <strong>IF Margin Rule:</strong>{' '}
+                      {liveWhatIfDiagnostic.checks.marginCheckText}
+                    </p>
+                    <p>
+                      <strong>IF Expiry Rule:</strong>{' '}
+                      {liveWhatIfDiagnostic.checks.expiryCheckText}
+                    </p>
+                    {liveWhatIfDiagnostic.checks.precedenceNote && (
+                      <p className="rounded bg-[#FFF8EB] px-2 py-1 font-medium text-[#B4690E]">
+                        {liveWhatIfDiagnostic.checks.precedenceNote}
+                      </p>
+                    )}
+                    {liveWhatIfDiagnostic.recommendation && (
+                      <p className="mt-2 rounded-lg border border-[#D8E1EE] bg-white p-2.5 text-[#111827]">
+                        <strong>THEN Recommended Action:</strong>{' '}
+                        {liveWhatIfDiagnostic.recommendation.recommended_action}
+                      </p>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              <div className="flex justify-end gap-2 pt-2">
                 <button
                   type="button"
                   onClick={() => setEditingProductId(null)}

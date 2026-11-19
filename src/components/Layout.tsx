@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import {
   Box,
   ChevronDown,
+  ClipboardList,
   Code2,
   Coffee,
   FileText,
@@ -20,6 +21,7 @@ import {
 import { useAcalen } from '../context/AcalenContext';
 import { NavTab } from '../types/acalen';
 import { AcalenPipelineModal } from './AcalenPipelineModal';
+import { AuditLogModal } from './AuditLogModal';
 
 interface LayoutProps {
   children: React.ReactNode;
@@ -69,6 +71,7 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
   const [accountMenuOpen, setAccountMenuOpen] = useState(false);
   const [pipelineOpen, setPipelineOpen] = useState(false);
   const [pipelineAutoRun, setPipelineAutoRun] = useState(false);
+  const [auditOpen, setAuditOpen] = useState(false);
 
   if (!currentUser) return <>{children}</>;
 
@@ -320,14 +323,27 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
 
                       <div className="border-t border-[#F1F5F9] py-1">
                         {isManager && (
-                          <button
-                            type="button"
-                            onClick={() => openPipeline(false)}
-                            className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-xs text-[#374151] hover:bg-[#F3F4F6]"
-                          >
-                            <Code2 className="h-3.5 w-3.5 text-[#1E325C]" />
-                            Inspect Engine Contract JSON
-                          </button>
+                          <>
+                            <button
+                              type="button"
+                              onClick={() => openPipeline(false)}
+                              className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-xs text-[#374151] hover:bg-[#F3F4F6]"
+                            >
+                              <Code2 className="h-3.5 w-3.5 text-[#1E325C]" />
+                              Inspect Engine Contract JSON
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setAccountMenuOpen(false);
+                                setAuditOpen(true);
+                              }}
+                              className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-xs text-[#374151] hover:bg-[#F3F4F6]"
+                            >
+                              <ClipboardList className="h-3.5 w-3.5 text-[#1E325C]" />
+                              System Audit Log
+                            </button>
+                          </>
                         )}
                         <button
                           type="button"
@@ -409,6 +425,7 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
         onClose={() => setPipelineOpen(false)}
         autoRun={pipelineAutoRun}
       />
+      <AuditLogModal open={auditOpen} onClose={() => setAuditOpen(false)} />
     </div>
   );
 };

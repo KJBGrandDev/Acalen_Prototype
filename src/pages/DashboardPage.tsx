@@ -29,6 +29,7 @@ import {
   getExpiryStatus,
   getProductStock,
   getStockStatus,
+  resolveEffectiveRule,
 } from '../engine/acalenEngine';
 import { AdvisoryReviewModal } from '../components/AdvisoryReviewModal';
 
@@ -36,6 +37,7 @@ export const DashboardPage: React.FC = () => {
   const {
     products,
     batches,
+    groupPolicies,
     rules,
     recommendations,
     todaySalesTotal,
@@ -54,11 +56,10 @@ export const DashboardPage: React.FC = () => {
     for (const product of products) {
       if (product.status !== 'ACTIVE') continue;
       const rule = rules.find((r) => r.product_id === product.product_id);
-      const safety = rule?.safety_stock ?? 10;
-      const warnDays = rule?.expiry_warning_days ?? 7;
+      const eff = resolveEffectiveRule(product, rule, groupPolicies);
 
       const qty = getProductStock(batches, product.product_id);
-      const stockStatus = getStockStatus(qty, safety);
+      const stockStatus = getStockStatus(qty, eff.safety_stock);
       if (stockStatus === 'LOW_STOCK') {
         belowSafety += 1;
       }
@@ -67,8 +68,9 @@ export const DashboardPage: React.FC = () => {
       if (earliest && earliest.qty_on_hand > 0) {
         const expStatus = getExpiryStatus(
           earliest.expiration_date,
-          warnDays,
-          REFERENCE_TODAY
+          eff.expiry_warning_days,
+          REFERENCE_TODAY,
+          product.is_perishable
         );
         if (expStatus === 'EXPIRING_SOON' || expStatus === 'EXPIRED') {
           expiring += 1;
@@ -76,7 +78,7 @@ export const DashboardPage: React.FC = () => {
       }
     }
     return { belowSafetyCount: belowSafety, expiringSoonCount: expiring };
-  }, [products, batches, rules]);
+  }, [products, batches, rules, groupPolicies]);
 
   const topRecommendations = useMemo(() => {
     const pending = recommendations.filter((r) => r.status === 'PENDING');

@@ -1,16 +1,21 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import {
   AcalenAnalysisContract,
+  AuditLogEntry,
   BusinessRule,
   CartItem,
   CategoryName,
+  DerivedIngredientForecast,
   DiscountType,
+  GroupRulePolicy,
   InventoryBatch,
   MovementType,
   NavTab,
   PaymentMethod,
   Product,
   ProductForecastSummary,
+  ProductItemType,
+  RecipeIngredient,
   Recommendation,
   RoleName,
   SalesOrder,
@@ -23,7 +28,9 @@ import {
   BASELINE_TODAY_SALES,
   CATEGORIES,
   DEFAULT_POS_CART,
+  INITIAL_AUDIT_LOGS,
   INITIAL_BATCHES,
+  INITIAL_GROUP_POLICIES,
   INITIAL_ORDERS,
   INITIAL_PRODUCTS,
   INITIAL_RULES,
@@ -34,6 +41,7 @@ import {
 } from '../data/seedData';
 import {
   buildServiceContractJSON,
+  calculateDerivedIngredientForecasts,
   calculateOrderTotals,
   deductStockFEFO,
   getProductStock,
@@ -41,19 +49,21 @@ import {
   runAcalenAnalysis,
 } from '../engine/acalenEngine';
 
-const STORAGE_KEY = 'acalen_demo_v2';
+const STORAGE_KEY = 'acalen_demo_v3';
 
 interface PersistedState {
   currentUserId: number | null;
   activeTab: NavTab;
   products: Product[];
   batches: InventoryBatch[];
+  groupPolicies: GroupRulePolicy[];
   rules: BusinessRule[];
   stockMovements: StockMovement[];
   orders: SalesOrder[];
   cart: CartItem[];
   forecasts: ProductForecastSummary[];
   recommendations: Recommendation[];
+  auditLogs: AuditLogEntry[];
   lastAnalysisRunAt: string;
 }
 
@@ -64,7 +74,8 @@ function createInitialPersistedState(): PersistedState {
     INITIAL_RULES,
     PRODUCT_FORECASTS,
     [],
-    REFERENCE_TODAY
+    REFERENCE_TODAY,
+    INITIAL_GROUP_POLICIES
   );
 
   return {
@@ -72,12 +83,14 @@ function createInitialPersistedState(): PersistedState {
     activeTab: 'dashboard',
     products: INITIAL_PRODUCTS,
     batches: INITIAL_BATCHES,
+    groupPolicies: INITIAL_GROUP_POLICIES,
     rules: INITIAL_RULES,
     stockMovements: INITIAL_STOCK_MOVEMENTS,
     orders: INITIAL_ORDERS,
     cart: DEFAULT_POS_CART,
     forecasts: PRODUCT_FORECASTS,
     recommendations: initialRecommendations,
+    auditLogs: INITIAL_AUDIT_LOGS,
     lastAnalysisRunAt: '2026-11-12T14:00:00.000Z',
   };
 }
@@ -87,7 +100,13 @@ function loadPersistedState(): PersistedState {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return createInitialPersistedState();
     const parsed = JSON.parse(raw) as PersistedState;
-    if (!parsed || !Array.isArray(parsed.products) || !Array.isArray(parsed.batches)) {
+    if (
+      !parsed ||
+      !Array.isArray(parsed.products) ||
+      !Array.isArray(parsed.batches) ||
+      !Array.isArray(parsed.groupPolicies) ||
+      !Array.isArray(parsed.auditLogs)
+    ) {
       return createInitialPersistedState();
     }
     return parsed;
@@ -96,10 +115,31 @@ function loadPersistedState(): PersistedState {
   }
 }
 
+function makeAuditEntry(
+  prevLogs: AuditLogEntry[],
+  actor: User,
+  module: AuditLogEntry['module'],
+  action: string,
+  details: string
+): AuditLogEntry {
+  const maxId = prevLogs.reduce((m, l) => Math.max(m, l.log_id), 0);
+  return {
+    log_id: maxId + 1,
+    timestamp: new Date().toISOString(),
+    actor_name: actor.full_name,
+    actor_role: actor.role_name,
+    module,
+    action,
+    details,
+  };
+}
+
 interface NewProductInput {
   product_name: string;
   sku: string;
   category_name: CategoryName;
+  item_type: ProductItemType;
+  is_perishable: boolean;
   unit_label: string;
   unit_cost: number;
   selling_price: number;
@@ -129,12 +169,15 @@ interface AcalenContextValue {
 
   products: Product[];
   batches: InventoryBatch[];
+  groupPolicies: GroupRulePolicy[];
   rules: BusinessRule[];
   stockMovements: StockMovement[];
   orders: SalesOrder[];
   cart: CartItem[];
   forecasts: ProductForecastSummary[];
+  derivedIngredientForecasts: DerivedIngredientForecast[];
   recommendations: Recommendation[];
+  auditLogs: AuditLogEntry[];
   lastAnalysisRunAt: string;
   latestContract: AcalenAnalysisContract;
 
@@ -157,8 +200,23 @@ interface AcalenContextValue {
   addProduct: (input: NewProductInput) => void;
   editProduct: (
     productId: number,
-    updates: Partial<Pick<Product, 'product_name' | 'category_name' | 'unit_label' | 'unit_cost' | 'selling_price' | 'supplier' | 'sellable_on_pos' | 'markdown_price'>>
+    updates: Partial<
+      Pick<
+        Product,
+        | 'product_name'
+        | 'category_name'
+        | 'item_type'
+        | 'is_perishable'
+        | 'unit_label'
+        | 'unit_cost'
+        | 'selling_price'
+        | 'supplier'
+        | 'sellable_on_pos'
+        | 'markdown_price'
+      >
+    >
   ) => void;
+  updateProductRecipe: (productId: number, recipe: RecipeIngredient[]) => void;
   recordStockIn: (params: {
     productId: number;
     batchNumber: string;
@@ -182,11 +240,27 @@ interface AcalenContextValue {
     reason: string;
   }) => { ok: boolean; error?: string };
 
+  updateGroupPolicy: (
+    categoryName: CategoryName,
+    updates: Omit<GroupRulePolicy, 'category_name' | 'item_type' | 'updated_at'>
+  ) => void;
   updateBusinessRule: (
     productId: number,
-    updates: Pick<
-      BusinessRule,
-      'reorder_level' | 'safety_stock' | 'target_margin_pct' | 'expiry_warning_days' | 'markdown_pct'
+    updates: Partial<
+      Pick<
+        BusinessRule,
+        | 'use_group_default'
+        | 'reorder_level'
+        | 'safety_stock'
+        | 'target_margin_pct'
+        | 'expiry_warning_days'
+        | 'markdown_pct'
+        | 'min_post_markdown_margin_pct'
+        | 'enable_stock_rule'
+        | 'enable_margin_rule'
+        | 'enable_expiry_rule'
+        | 'suppress_reorder_on_expiry_surplus'
+      >
     >
   ) => void;
 
@@ -212,7 +286,7 @@ export const AcalenProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
     } catch {
-      // Ignore storage quota issues in restricted browsers
+      // Ignore storage quota issues
     }
   }, [state]);
 
@@ -236,18 +310,15 @@ export const AcalenProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     [state.currentUserId]
   );
 
-  const setActiveTab = useCallback(
-    (tab: NavTab) => {
-      setState((prev) => {
-        const user = USERS.find((u) => u.user_id === prev.currentUserId);
-        if (user?.role_name === 'CASHIER' && tab !== 'pos') {
-          return { ...prev, activeTab: 'pos' };
-        }
-        return { ...prev, activeTab: tab };
-      });
-    },
-    []
-  );
+  const setActiveTab = useCallback((tab: NavTab) => {
+    setState((prev) => {
+      const user = USERS.find((u) => u.user_id === prev.currentUserId);
+      if (user?.role_name === 'CASHIER' && tab !== 'pos') {
+        return { ...prev, activeTab: 'pos' };
+      }
+      return { ...prev, activeTab: tab };
+    });
+  }, []);
 
   const login = useCallback(
     (username: string, password: string): { ok: boolean; error?: string } => {
@@ -266,6 +337,16 @@ export const AcalenProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         ...prev,
         currentUserId: matched.user_id,
         activeTab: landingTab,
+        auditLogs: [
+          makeAuditEntry(
+            prev.auditLogs,
+            matched,
+            'AUTH',
+            'POST /api/auth/login',
+            `Authenticated ${matched.role_name} session (${matched.username}).`
+          ),
+          ...prev.auditLogs,
+        ],
       }));
       pushToast({
         type: 'success',
@@ -281,7 +362,25 @@ export const AcalenProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   );
 
   const logout = useCallback(() => {
-    setState((prev) => ({ ...prev, currentUserId: null }));
+    setState((prev) => {
+      const actor = USERS.find((u) => u.user_id === prev.currentUserId);
+      return {
+        ...prev,
+        currentUserId: null,
+        auditLogs: actor
+          ? [
+              makeAuditEntry(
+                prev.auditLogs,
+                actor,
+                'AUTH',
+                'POST /api/auth/logout',
+                `Signed out ${actor.role_name} session.`
+              ),
+              ...prev.auditLogs,
+            ]
+          : prev.auditLogs,
+      };
+    });
   }, []);
 
   const switchDemoRole = useCallback(
@@ -292,6 +391,16 @@ export const AcalenProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         ...prev,
         currentUserId: target.user_id,
         activeTab: role === 'CASHIER' ? 'pos' : 'dashboard',
+        auditLogs: [
+          makeAuditEntry(
+            prev.auditLogs,
+            target,
+            'AUTH',
+            'ROLE_SWITCH',
+            `Demo role switched to ${target.role_name} (${target.full_name}).`
+          ),
+          ...prev.auditLogs,
+        ],
       }));
       pushToast({
         type: 'info',
@@ -436,6 +545,7 @@ export const AcalenProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         ewallet_ref: paymentMethod === 'E_WALLET' ? ewalletRef || `EW-${nextOrderId}` : undefined,
         status: 'COMPLETED',
         items: fefoResult.deductedItems,
+        ingredient_deductions: fefoResult.ingredientDeductions,
         created_at: new Date().toISOString(),
       };
 
@@ -443,7 +553,8 @@ export const AcalenProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         (max, m) => Math.max(max, m.movement_id),
         0
       );
-      const newMovements: StockMovement[] = fefoResult.deductedItems.map(
+
+      const saleMovements: StockMovement[] = fefoResult.deductedItems.map(
         (item, idx) => ({
           movement_id: maxMoveId + idx + 1,
           batch_id: item.batch_id,
@@ -459,33 +570,72 @@ export const AcalenProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         })
       );
 
+      const recipeMovements: StockMovement[] = fefoResult.ingredientDeductions.map(
+        (ingDed, idx) => ({
+          movement_id: maxMoveId + saleMovements.length + idx + 1,
+          batch_id: ingDed.batch_id,
+          batch_number: ingDed.batch_number,
+          product_id: ingDed.product_id,
+          product_name: ingDed.product_name,
+          user_id: actor.user_id,
+          user_name: actor.full_name,
+          movement_type: 'RECIPE_DEDUCT',
+          quantity: -ingDed.quantity,
+          reason: `Micro-ingredient BOM deduction (${newOrder.receipt_no})`,
+          created_at: newOrder.created_at,
+        })
+      );
+
       const nextRecommendations = runAcalenAnalysis(
         state.products,
         fefoResult.updatedBatches,
         state.rules,
         state.forecasts,
         state.recommendations,
-        REFERENCE_TODAY
+        REFERENCE_TODAY,
+        state.groupPolicies
       );
 
       setState((prev) => ({
         ...prev,
         batches: fefoResult.updatedBatches,
         orders: [newOrder, ...prev.orders],
-        stockMovements: [...newMovements, ...prev.stockMovements],
+        stockMovements: [...recipeMovements, ...saleMovements, ...prev.stockMovements],
         cart: [],
         recommendations: nextRecommendations,
+        auditLogs: [
+          makeAuditEntry(
+            prev.auditLogs,
+            actor,
+            'POS',
+            'POST /api/pos/sales',
+            `Recorded ${newOrder.receipt_no} (₱${newOrder.total_amount.toFixed(2)}) · Deducted ${fefoResult.deductedItems.length} menu batch(es) & ${fefoResult.ingredientDeductions.length} micro-ingredient batch(es).`
+          ),
+          ...prev.auditLogs,
+        ],
       }));
 
       pushToast({
         type: 'success',
         title: `Sale recorded (${newOrder.receipt_no})`,
-        description: `FEFO batch stock deducted automatically across ${fefoResult.deductedItems.length} line item(s).`,
+        description: `FEFO menu + ${fefoResult.ingredientDeductions.length} micro-ingredient batch deductions synced.`,
       });
 
       return { ok: true, order: newOrder };
     },
-    [state.cart, state.products, state.batches, state.orders, state.stockMovements, state.rules, state.forecasts, state.recommendations, currentUser, pushToast]
+    [
+      state.cart,
+      state.products,
+      state.batches,
+      state.orders,
+      state.stockMovements,
+      state.rules,
+      state.forecasts,
+      state.recommendations,
+      state.groupPolicies,
+      currentUser,
+      pushToast,
+    ]
   );
 
   const processReturnOrVoid = useCallback(
@@ -511,7 +661,13 @@ export const AcalenProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       }
 
       const actor = currentUser ?? USERS[1];
-      const restoreEntries: Array<{ batch_id: number; qty: number; product_id: number; product_name: string; batch_number: string }> = [];
+      const restoreEntries: Array<{
+        batch_id: number;
+        qty: number;
+        product_id: number;
+        product_name: string;
+        batch_number: string;
+      }> = [];
 
       const updatedItems = targetOrder.items.map((item) => {
         if (mode === 'VOID_ORDER') {
@@ -550,10 +706,19 @@ export const AcalenProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         return { ok: false, error: 'No returnable item quantity selected.' };
       }
 
-      const nextBatches = restoreStockFromItems(
-        state.batches,
-        restoreEntries.map((e) => ({ batch_id: e.batch_id, qty: e.qty }))
-      );
+      // Restore raw ingredients too on full order void
+      const rawRestoreEntries =
+        mode === 'VOID_ORDER' && targetOrder.ingredient_deductions
+          ? targetOrder.ingredient_deductions.map((d) => ({
+              batch_id: d.batch_id,
+              qty: d.quantity,
+            }))
+          : [];
+
+      const nextBatches = restoreStockFromItems(state.batches, [
+        ...restoreEntries.map((e) => ({ batch_id: e.batch_id, qty: e.qty })),
+        ...rawRestoreEntries,
+      ]);
 
       const allReturned = updatedItems.every((i) => i.returned_qty >= i.quantity);
       const nextStatus: SalesOrder['status'] =
@@ -583,7 +748,8 @@ export const AcalenProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         state.rules,
         state.forecasts,
         state.recommendations,
-        REFERENCE_TODAY
+        REFERENCE_TODAY,
+        state.groupPolicies
       );
 
       setState((prev) => ({
@@ -594,6 +760,16 @@ export const AcalenProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         ),
         stockMovements: [...returnMovements, ...prev.stockMovements],
         recommendations: nextRecommendations,
+        auditLogs: [
+          makeAuditEntry(
+            prev.auditLogs,
+            actor,
+            'POS',
+            'POST /api/pos/returns',
+            `${mode === 'VOID_ORDER' ? 'Voided' : 'Returned item on'} ${targetOrder.receipt_no}: ${reason}`
+          ),
+          ...prev.auditLogs,
+        ],
       }));
 
       pushToast({
@@ -604,7 +780,18 @@ export const AcalenProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
       return { ok: true };
     },
-    [state.orders, state.batches, state.stockMovements, state.products, state.rules, state.forecasts, state.recommendations, currentUser, pushToast]
+    [
+      state.orders,
+      state.batches,
+      state.stockMovements,
+      state.products,
+      state.rules,
+      state.forecasts,
+      state.recommendations,
+      state.groupPolicies,
+      currentUser,
+      pushToast,
+    ]
   );
 
   const addProduct = useCallback(
@@ -621,19 +808,30 @@ export const AcalenProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         0
       );
       const cat = CATEGORIES.find((c) => c.category_name === input.category_name);
+      const groupPolicy = state.groupPolicies.find(
+        (g) => g.category_name === input.category_name
+      );
 
       const newProduct: Product = {
         product_id: nextProductId,
         sku: input.sku.trim().toUpperCase(),
         category_id: cat?.category_id ?? 1,
         category_name: input.category_name,
+        item_type: input.item_type,
+        is_perishable: input.is_perishable,
+        history_months: 0, // Demonstrates SIA 1 Limitation #1 (>=6 mos required)
+        recipe: input.item_type === 'FINISHED_PRODUCT' ? [] : undefined,
         product_name: input.product_name.trim(),
         unit_label: input.unit_label,
         unit_cost: input.unit_cost,
         selling_price: input.selling_price,
-        sellable_on_pos: input.sellable_on_pos,
+        sellable_on_pos:
+          input.item_type === 'FINISHED_PRODUCT' && input.sellable_on_pos,
         supplier: input.supplier.trim() || 'Waxi Direct Supplier',
-        image_url: input.sellable_on_pos ? './images/ucc-coffee.png' : undefined,
+        image_url:
+          input.item_type === 'FINISHED_PRODUCT' && input.sellable_on_pos
+            ? './images/ucc-coffee.png'
+            : undefined,
         status: 'ACTIVE',
       };
 
@@ -650,11 +848,20 @@ export const AcalenProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       const newRule: BusinessRule = {
         rule_id: nextRuleId,
         product_id: nextProductId,
+        use_group_default: true,
         reorder_level: input.reorder_level,
         safety_stock: input.safety_stock,
-        target_margin_pct: 35,
-        expiry_warning_days: 7,
-        markdown_pct: 20,
+        target_margin_pct: groupPolicy?.target_margin_pct ?? 35,
+        expiry_warning_days: groupPolicy?.expiry_warning_days ?? 7,
+        markdown_pct:
+          input.item_type === 'FINISHED_PRODUCT' && input.is_perishable
+            ? groupPolicy?.markdown_pct ?? 20
+            : 0,
+        min_post_markdown_margin_pct: groupPolicy?.min_post_markdown_margin_pct ?? 35,
+        enable_stock_rule: true,
+        enable_margin_rule: input.item_type === 'FINISHED_PRODUCT',
+        enable_expiry_rule: input.is_perishable,
+        suppress_reorder_on_expiry_surplus: true,
         updated_at: new Date().toISOString(),
       };
 
@@ -681,7 +888,8 @@ export const AcalenProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         nextRules,
         state.forecasts,
         state.recommendations,
-        REFERENCE_TODAY
+        REFERENCE_TODAY,
+        state.groupPolicies
       );
 
       setState((prev) => ({
@@ -691,6 +899,16 @@ export const AcalenProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         rules: nextRules,
         stockMovements: [newMovement, ...prev.stockMovements],
         recommendations: nextRecommendations,
+        auditLogs: [
+          makeAuditEntry(
+            prev.auditLogs,
+            actor,
+            'INVENTORY',
+            'POST /api/products',
+            `Created ${newProduct.item_type} "${newProduct.product_name}" (${newProduct.sku}) inheriting ${newProduct.category_name} Group Policy.`
+          ),
+          ...prev.auditLogs,
+        ],
       }));
 
       pushToast({
@@ -699,7 +917,17 @@ export const AcalenProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         description: `${input.initial_qty} ${input.unit_label} logged under ${newBatch.batch_number}.`,
       });
     },
-    [state.products, state.batches, state.rules, state.stockMovements, state.forecasts, state.recommendations, currentUser, pushToast]
+    [
+      state.products,
+      state.batches,
+      state.rules,
+      state.stockMovements,
+      state.forecasts,
+      state.recommendations,
+      state.groupPolicies,
+      currentUser,
+      pushToast,
+    ]
   );
 
   const editProduct = useCallback(
@@ -710,6 +938,8 @@ export const AcalenProvider: React.FC<{ children: React.ReactNode }> = ({ childr
           Product,
           | 'product_name'
           | 'category_name'
+          | 'item_type'
+          | 'is_perishable'
           | 'unit_label'
           | 'unit_cost'
           | 'selling_price'
@@ -719,6 +949,7 @@ export const AcalenProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         >
       >
     ) => {
+      const actor = currentUser ?? USERS[0];
       const cat = updates.category_name
         ? CATEGORIES.find((c) => c.category_name === updates.category_name)
         : undefined;
@@ -739,13 +970,27 @@ export const AcalenProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         state.rules,
         state.forecasts,
         state.recommendations,
-        REFERENCE_TODAY
+        REFERENCE_TODAY,
+        state.groupPolicies
       );
+
+      const prodName =
+        nextProducts.find((p) => p.product_id === productId)?.product_name ?? 'Product';
 
       setState((prev) => ({
         ...prev,
         products: nextProducts,
         recommendations: nextRecommendations,
+        auditLogs: [
+          makeAuditEntry(
+            prev.auditLogs,
+            actor,
+            'INVENTORY',
+            'PATCH /api/products',
+            `Updated product attributes for ${prodName}.`
+          ),
+          ...prev.auditLogs,
+        ],
       }));
 
       pushToast({
@@ -754,7 +999,70 @@ export const AcalenProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         description: 'Catalog changes synced across POS, Inventory, and Decision Support.',
       });
     },
-    [state.products, state.batches, state.rules, state.forecasts, state.recommendations, pushToast]
+    [
+      state.products,
+      state.batches,
+      state.rules,
+      state.forecasts,
+      state.recommendations,
+      state.groupPolicies,
+      currentUser,
+      pushToast,
+    ]
+  );
+
+  const updateProductRecipe = useCallback(
+    (productId: number, recipe: RecipeIngredient[]) => {
+      const actor = currentUser ?? USERS[0];
+      const nextProducts = state.products.map((p) =>
+        p.product_id === productId ? { ...p, recipe } : p
+      );
+
+      const nextRecommendations = runAcalenAnalysis(
+        nextProducts,
+        state.batches,
+        state.rules,
+        state.forecasts,
+        state.recommendations,
+        REFERENCE_TODAY,
+        state.groupPolicies
+      );
+
+      const prodName =
+        nextProducts.find((p) => p.product_id === productId)?.product_name ?? 'Product';
+
+      setState((prev) => ({
+        ...prev,
+        products: nextProducts,
+        recommendations: nextRecommendations,
+        auditLogs: [
+          makeAuditEntry(
+            prev.auditLogs,
+            actor,
+            'INVENTORY',
+            'UPDATE_RECIPE_BOM',
+            `Updated micro-ingredient recipe (${recipe.length} ingredient(s)) for ${prodName}.`
+          ),
+          ...prev.auditLogs,
+        ],
+      }));
+
+      pushToast({
+        type: 'success',
+        title: `Recipe BOM updated for ${prodName}`,
+        description: 'Derived raw ingredient forecasts & POS deductions recalculated.',
+      });
+    },
+    [
+      state.products,
+      state.batches,
+      state.rules,
+      state.forecasts,
+      state.recommendations,
+      state.groupPolicies,
+      currentUser,
+      pushToast,
+    ]
   );
 
   const recordStockIn = useCallback(
@@ -791,7 +1099,7 @@ export const AcalenProvider: React.FC<{ children: React.ReactNode }> = ({ childr
           b.batch_id === existingBatch.batch_id
             ? {
                 ...b,
-                qty_on_hand: b.qty_on_hand + qty,
+                qty_on_hand: Math.round((b.qty_on_hand + qty) * 1000) / 1000,
                 unit_cost: unitCost,
                 expiration_date: expirationDate,
               }
@@ -842,7 +1150,8 @@ export const AcalenProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         state.rules,
         state.forecasts,
         state.recommendations,
-        REFERENCE_TODAY
+        REFERENCE_TODAY,
+        state.groupPolicies
       );
 
       setState((prev) => ({
@@ -851,6 +1160,16 @@ export const AcalenProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         batches: nextBatches,
         stockMovements: [movement, ...prev.stockMovements],
         recommendations: nextRecommendations,
+        auditLogs: [
+          makeAuditEntry(
+            prev.auditLogs,
+            actor,
+            'INVENTORY',
+            'POST /api/inventory/batches',
+            `Stock-In +${qty} ${product.unit_label} for ${product.product_name} (${normalizedBatch}).`
+          ),
+          ...prev.auditLogs,
+        ],
       }));
 
       pushToast({
@@ -859,7 +1178,17 @@ export const AcalenProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         description: `${product.product_name} · ${normalizedBatch} updated.`,
       });
     },
-    [state.products, state.batches, state.stockMovements, state.rules, state.forecasts, state.recommendations, currentUser, pushToast]
+    [
+      state.products,
+      state.batches,
+      state.stockMovements,
+      state.rules,
+      state.forecasts,
+      state.recommendations,
+      state.groupPolicies,
+      currentUser,
+      pushToast,
+    ]
   );
 
   const recordStockTransfer = useCallback(
@@ -888,7 +1217,9 @@ export const AcalenProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       }
 
       const nextBatches = state.batches.map((b) =>
-        b.batch_id === batchId ? { ...b, qty_on_hand: b.qty_on_hand - qty } : b
+        b.batch_id === batchId
+          ? { ...b, qty_on_hand: Math.round((b.qty_on_hand - qty) * 1000) / 1000 }
+          : b
       );
       const maxMoveId = state.stockMovements.reduce(
         (m, x) => Math.max(m, x.movement_id),
@@ -914,7 +1245,8 @@ export const AcalenProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         state.rules,
         state.forecasts,
         state.recommendations,
-        REFERENCE_TODAY
+        REFERENCE_TODAY,
+        state.groupPolicies
       );
 
       setState((prev) => ({
@@ -922,6 +1254,16 @@ export const AcalenProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         batches: nextBatches,
         stockMovements: [movement, ...prev.stockMovements],
         recommendations: nextRecommendations,
+        auditLogs: [
+          makeAuditEntry(
+            prev.auditLogs,
+            actor,
+            'INVENTORY',
+            'STOCK_TRANSFER',
+            `Transferred ${qty} ${product.unit_label} of ${product.product_name} (${batch.batch_number}) to ${destination}.`
+          ),
+          ...prev.auditLogs,
+        ],
       }));
 
       pushToast({
@@ -931,7 +1273,17 @@ export const AcalenProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       });
       return { ok: true };
     },
-    [state.products, state.batches, state.stockMovements, state.rules, state.forecasts, state.recommendations, currentUser, pushToast]
+    [
+      state.products,
+      state.batches,
+      state.stockMovements,
+      state.rules,
+      state.forecasts,
+      state.recommendations,
+      state.groupPolicies,
+      currentUser,
+      pushToast,
+    ]
   );
 
   const recordWastage = useCallback(
@@ -960,7 +1312,9 @@ export const AcalenProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       }
 
       const nextBatches = state.batches.map((b) =>
-        b.batch_id === batchId ? { ...b, qty_on_hand: b.qty_on_hand - qty } : b
+        b.batch_id === batchId
+          ? { ...b, qty_on_hand: Math.round((b.qty_on_hand - qty) * 1000) / 1000 }
+          : b
       );
       const maxMoveId = state.stockMovements.reduce(
         (m, x) => Math.max(m, x.movement_id),
@@ -986,7 +1340,8 @@ export const AcalenProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         state.rules,
         state.forecasts,
         state.recommendations,
-        REFERENCE_TODAY
+        REFERENCE_TODAY,
+        state.groupPolicies
       );
 
       setState((prev) => ({
@@ -994,6 +1349,16 @@ export const AcalenProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         batches: nextBatches,
         stockMovements: [movement, ...prev.stockMovements],
         recommendations: nextRecommendations,
+        auditLogs: [
+          makeAuditEntry(
+            prev.auditLogs,
+            actor,
+            'INVENTORY',
+            `RECORD_${movementType}`,
+            `Recorded ${qty} ${product.unit_label} ${movementType.toLowerCase()} on ${product.product_name} (${batch.batch_number}): ${reason.trim()}.`
+          ),
+          ...prev.auditLogs,
+        ],
       }));
 
       pushToast({
@@ -1003,17 +1368,103 @@ export const AcalenProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       });
       return { ok: true };
     },
-    [state.products, state.batches, state.stockMovements, state.rules, state.forecasts, state.recommendations, currentUser, pushToast]
+    [
+      state.products,
+      state.batches,
+      state.stockMovements,
+      state.rules,
+      state.forecasts,
+      state.recommendations,
+      state.groupPolicies,
+      currentUser,
+      pushToast,
+    ]
+  );
+
+  const updateGroupPolicy = useCallback(
+    (
+      categoryName: CategoryName,
+      updates: Omit<GroupRulePolicy, 'category_name' | 'item_type' | 'updated_at'>
+    ) => {
+      const actor = currentUser ?? USERS[0];
+      const nextGroups = state.groupPolicies.map((g) =>
+        g.category_name === categoryName
+          ? { ...g, ...updates, updated_at: new Date().toISOString() }
+          : g
+      );
+
+      const nextRecommendations = runAcalenAnalysis(
+        state.products,
+        state.batches,
+        state.rules,
+        state.forecasts,
+        state.recommendations,
+        REFERENCE_TODAY,
+        nextGroups
+      );
+
+      const affectedCount = state.products.filter((p) => {
+        if (p.category_name !== categoryName) return false;
+        const r = state.rules.find((x) => x.product_id === p.product_id);
+        return r?.use_group_default ?? true;
+      }).length;
+
+      setState((prev) => ({
+        ...prev,
+        groupPolicies: nextGroups,
+        recommendations: nextRecommendations,
+        lastAnalysisRunAt: new Date().toISOString(),
+        auditLogs: [
+          makeAuditEntry(
+            prev.auditLogs,
+            actor,
+            'RULES',
+            'PATCH /api/rules/groups',
+            `Updated "${categoryName}" Group Policy (affecting ${affectedCount} inheriting product(s); custom overrides preserved).`
+          ),
+          ...prev.auditLogs,
+        ],
+      }));
+
+      pushToast({
+        type: 'success',
+        title: `${categoryName} Group Policy updated`,
+        description: `Applied to ${affectedCount} inheriting product(s); custom overrides remained untouched.`,
+      });
+    },
+    [
+      state.groupPolicies,
+      state.products,
+      state.batches,
+      state.rules,
+      state.forecasts,
+      state.recommendations,
+      currentUser,
+      pushToast,
+    ]
   );
 
   const updateBusinessRule = useCallback(
     (
       productId: number,
-      updates: Pick<
-        BusinessRule,
-        'reorder_level' | 'safety_stock' | 'target_margin_pct' | 'expiry_warning_days' | 'markdown_pct'
+      updates: Partial<
+        Pick<
+          BusinessRule,
+          | 'use_group_default'
+          | 'reorder_level'
+          | 'safety_stock'
+          | 'target_margin_pct'
+          | 'expiry_warning_days'
+          | 'markdown_pct'
+          | 'min_post_markdown_margin_pct'
+          | 'enable_stock_rule'
+          | 'enable_margin_rule'
+          | 'enable_expiry_rule'
+          | 'suppress_reorder_on_expiry_surplus'
+        >
       >
     ) => {
+      const actor = currentUser ?? USERS[0];
       const nextRules = state.rules.map((r) =>
         r.product_id === productId
           ? { ...r, ...updates, updated_at: new Date().toISOString() }
@@ -1026,42 +1477,81 @@ export const AcalenProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         nextRules,
         state.forecasts,
         state.recommendations,
-        REFERENCE_TODAY
+        REFERENCE_TODAY,
+        state.groupPolicies
       );
+
+      const prod = state.products.find((p) => p.product_id === productId);
+      const prodName = prod?.product_name ?? 'Product';
+      const modeDesc =
+        updates.use_group_default === true
+          ? `Reset to inherit ${prod?.category_name ?? 'Group'} Policy`
+          : 'Saved Custom Override Policy';
 
       setState((prev) => ({
         ...prev,
         rules: nextRules,
         recommendations: nextRecommendations,
         lastAnalysisRunAt: new Date().toISOString(),
+        auditLogs: [
+          makeAuditEntry(
+            prev.auditLogs,
+            actor,
+            'RULES',
+            'PATCH /api/rules',
+            `${prodName}: ${modeDesc}. Re-evaluated rule engine.`
+          ),
+          ...prev.auditLogs,
+        ],
       }));
 
-      const prodName =
-        state.products.find((p) => p.product_id === productId)?.product_name ?? 'Product';
       pushToast({
         type: 'success',
         title: `Rule updated for ${prodName}`,
-        description: 'Acalen rule engine re-evaluated active alerts automatically.',
+        description: `${modeDesc}. Active alerts re-evaluated.`,
       });
     },
-    [state.rules, state.products, state.batches, state.forecasts, state.recommendations, pushToast]
+    [
+      state.rules,
+      state.products,
+      state.batches,
+      state.forecasts,
+      state.recommendations,
+      state.groupPolicies,
+      currentUser,
+      pushToast,
+    ]
   );
 
   const triggerAnalysisRun = useCallback(
-    () => {
+    (
+      triggerSource: 'manual_dashboard_run' | 'scheduled_hourly_job' | 'rule_update_recheck' = 'manual_dashboard_run'
+    ) => {
+      const actor = currentUser ?? USERS[0];
       const nextRecommendations = runAcalenAnalysis(
         state.products,
         state.batches,
         state.rules,
         state.forecasts,
         state.recommendations,
-        REFERENCE_TODAY
+        REFERENCE_TODAY,
+        state.groupPolicies
       );
 
       setState((prev) => ({
         ...prev,
         recommendations: nextRecommendations,
         lastAnalysisRunAt: new Date().toISOString(),
+        auditLogs: [
+          makeAuditEntry(
+            prev.auditLogs,
+            actor,
+            'ACALEN_ENGINE',
+            'POST /api/acalen/analyze',
+            `Trigger: ${triggerSource}. Evaluated ${state.products.length} products (${nextRecommendations.length} active alert(s)).`
+          ),
+          ...prev.auditLogs,
+        ],
       }));
 
       pushToast({
@@ -1070,16 +1560,37 @@ export const AcalenProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         description: `Holt-Winters & Chronos-Bolt evaluated ${state.products.length} products; ${nextRecommendations.length} active advisory alert(s).`,
       });
     },
-    [state.products, state.batches, state.rules, state.forecasts, state.recommendations, pushToast]
+    [
+      state.products,
+      state.batches,
+      state.rules,
+      state.forecasts,
+      state.recommendations,
+      state.groupPolicies,
+      currentUser,
+      pushToast,
+    ]
   );
 
   const updateRecommendationStatus = useCallback(
     (recId: number, status: 'APPROVED' | 'DISMISSED') => {
+      const actor = currentUser ?? USERS[0];
+      const target = state.recommendations.find((r) => r.recommendation_id === recId);
       setState((prev) => ({
         ...prev,
         recommendations: prev.recommendations.map((r) =>
           r.recommendation_id === recId ? { ...r, status } : r
         ),
+        auditLogs: [
+          makeAuditEntry(
+            prev.auditLogs,
+            actor,
+            'ACALEN_ENGINE',
+            `ADVISORY_${status}`,
+            `${status} advisory "${target?.short_title ?? recId}" for ${target?.product_name ?? 'item'}.`
+          ),
+          ...prev.auditLogs,
+        ],
       }));
       pushToast({
         type: status === 'APPROVED' ? 'success' : 'info',
@@ -1090,11 +1601,12 @@ export const AcalenProvider: React.FC<{ children: React.ReactNode }> = ({ childr
             : 'Recommendation marked reviewed and dismissed.',
       });
     },
-    [pushToast]
+    [state.recommendations, currentUser, pushToast]
   );
 
   const applyRecommendationAction = useCallback(
     (recId: number) => {
+      const actor = currentUser ?? USERS[0];
       const rec = state.recommendations.find((r) => r.recommendation_id === recId);
       if (!rec) return;
 
@@ -1118,7 +1630,6 @@ export const AcalenProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         );
         appliedSummary = `Updated selling price to ₱${rec.suggested_price}.`;
       } else if (rec.suggested_reorder_qty) {
-        const actor = currentUser ?? USERS[0];
         const prod = state.products.find((p) => p.product_id === rec.product_id);
         if (prod) {
           const nextBatchId =
@@ -1169,7 +1680,8 @@ export const AcalenProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         state.rules,
         state.forecasts,
         approvedBase,
-        REFERENCE_TODAY
+        REFERENCE_TODAY,
+        state.groupPolicies
       );
 
       setState((prev) => ({
@@ -1178,6 +1690,16 @@ export const AcalenProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         batches: nextBatches,
         stockMovements: nextMovements,
         recommendations: nextRecommendations,
+        auditLogs: [
+          makeAuditEntry(
+            prev.auditLogs,
+            actor,
+            'ACALEN_ENGINE',
+            'APPLY_ADVISORY',
+            `Applied recommendation for ${rec.product_name}: ${appliedSummary}`
+          ),
+          ...prev.auditLogs,
+        ],
       }));
 
       pushToast({
@@ -1186,7 +1708,17 @@ export const AcalenProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         description: appliedSummary,
       });
     },
-    [state.recommendations, state.products, state.batches, state.stockMovements, state.rules, state.forecasts, currentUser, pushToast]
+    [
+      state.recommendations,
+      state.products,
+      state.batches,
+      state.stockMovements,
+      state.rules,
+      state.forecasts,
+      state.groupPolicies,
+      currentUser,
+      pushToast,
+    ]
   );
 
   const resetDemoData = useCallback(() => {
@@ -1202,9 +1734,22 @@ export const AcalenProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     pushToast({
       type: 'info',
       title: 'Demo dataset restored',
-      description: 'All inventory batches, POS sales, rules, and alerts reset to baseline.',
+      description: 'All inventory batches, BOM recipes, group policies, and alerts reset.',
     });
   }, [pushToast]);
+
+  const derivedIngredientForecasts = useMemo(
+    () =>
+      calculateDerivedIngredientForecasts(
+        state.products,
+        state.batches,
+        state.forecasts,
+        state.rules,
+        state.groupPolicies,
+        7
+      ),
+    [state.products, state.batches, state.forecasts, state.rules, state.groupPolicies]
+  );
 
   const { todaySalesTotal, todayOrderCount } = useMemo(() => {
     const liveOrders = state.orders.filter((o) => o.order_id > 1086);
@@ -1221,7 +1766,6 @@ export const AcalenProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       netLiveSales += Math.max(0, order.total_amount - returnedValue);
     }
 
-    // Account for any returns/voids on the seeded baseline orders 1085-1086
     const seededOrders = state.orders.filter((o) => o.order_id <= 1086);
     let baselineAdjustment = 0;
     let voidedSeededCount = 0;
@@ -1260,9 +1804,17 @@ export const AcalenProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         state.rules,
         state.forecasts,
         state.recommendations,
-        'manual_dashboard_run'
+        'manual_dashboard_run',
+        state.groupPolicies
       ),
-    [state.products, state.batches, state.rules, state.forecasts, state.recommendations]
+    [
+      state.products,
+      state.batches,
+      state.rules,
+      state.forecasts,
+      state.recommendations,
+      state.groupPolicies,
+    ]
   );
 
   const value: AcalenContextValue = {
@@ -1274,12 +1826,15 @@ export const AcalenProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     switchDemoRole,
     products: state.products,
     batches: state.batches,
+    groupPolicies: state.groupPolicies,
     rules: state.rules,
     stockMovements: state.stockMovements,
     orders: state.orders,
     cart: state.cart,
     forecasts: state.forecasts,
+    derivedIngredientForecasts,
     recommendations: state.recommendations,
+    auditLogs: state.auditLogs,
     lastAnalysisRunAt: state.lastAnalysisRunAt,
     latestContract,
     todaySalesTotal,
@@ -1292,9 +1847,11 @@ export const AcalenProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     processReturnOrVoid,
     addProduct,
     editProduct,
+    updateProductRecipe,
     recordStockIn,
     recordStockTransfer,
     recordWastage,
+    updateGroupPolicy,
     updateBusinessRule,
     triggerAnalysisRun,
     updateRecommendationStatus,
