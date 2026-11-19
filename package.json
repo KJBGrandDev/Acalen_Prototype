@@ -1,0 +1,41 @@
+{
+  "name": "acalen_prototype",
+  "version": "1.0.0",
+  "description": "Acalen: Integrated POS, Batch Inventory, Predictive Analytics & Rule-Based Decision Support Prototype for Waxi's Cafe",
+  "main": "src/main.tsx",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/KJBGrandDev/Acalen_Prototype.git"
+  },
+  "keywords": [
+    "pos",
+    "inventory-management",
+    "predictive-analytics",
+    "decision-support"
+  ],
+  "bugs": {
+    "url": "https://github.com/KJBGrandDev/Acalen_Prototype/issues"
+  },
+  "homepage": "https://github.com/KJBGrandDev/Acalen_Prototype#readme",
+  "dependencies": {
+    "lucide-react": "^1.76.0",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
+    "recharts": "^3.11.0"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.3.5",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@vitejs/plugin-react": "^6.3.0",
+    "tailwindcss": "^4.3.5",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.8"
+  }
+}
