@@ -304,10 +304,10 @@ export const ReportsPage: React.FC = () => {
               type="button"
               onClick={() => setAuditOpen(true)}
               className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-[#D8E1EE] bg-[#EFF3F9] px-3 py-2 text-xs font-semibold text-[#1E325C] hover:bg-[#E2EAF5]"
-              title="View RA 10173 Audit & Activity Log"
+              title="View Activity History (RA 10173 Audit Log)"
             >
               <ClipboardList className="h-3.5 w-3.5" />
-              Audit
+              Activity Log
             </button>
           </div>
         </div>

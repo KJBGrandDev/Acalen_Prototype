@@ -59,22 +59,23 @@ export const PriorityPill: React.FC<{ priority: 'HIGH' | 'MEDIUM' | 'LOW' }> = (
 export const RuleCodeBadge: React.FC<{ code: RuleTriggeredCode }> = ({ code }) => {
   const map: Record<RuleTriggeredCode, { label: string; cls: string }> = {
     STOCK_SHORTAGE: {
-      label: 'STOCK_SHORTAGE',
+      label: 'Low Stock',
       cls: 'bg-[#FEF2F2] text-[#C53030] border-[#FECACA]',
     },
     BELOW_TARGET_MARGIN: {
-      label: 'BELOW_TARGET_MARGIN',
+      label: 'Low Profit',
       cls: 'bg-[#EEF2F7] text-[#1E325C] border-[#D2DCEB]',
     },
     EXPIRY_WARNING: {
-      label: 'EXPIRY_WARNING',
+      label: 'Expiring Soon',
       cls: 'bg-[#FFF8EB] text-[#B4690E] border-[#FDE68A]',
     },
   };
   const cfg = map[code];
   return (
     <span
-      className={`inline-flex items-center rounded border px-2 py-0.5 font-mono text-[11px] font-medium ${cfg.cls}`}
+      title={code}
+      className={`inline-flex items-center rounded-md border px-2 py-0.5 text-[11px] font-semibold ${cfg.cls}`}
     >
       {cfg.label}
     </span>

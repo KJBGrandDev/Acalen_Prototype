@@ -350,7 +350,7 @@ export const RulesPage: React.FC = () => {
         <div className="acalen-card p-5">
           <div className="flex items-start justify-between">
             <span className="text-xs font-medium text-[#6B7280]">
-              Category Group Policies
+              Category Default Settings
             </span>
             <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-[#EFF3F9] text-[#1E325C]">
               <SlidersHorizontal className="h-4 w-4" />
@@ -359,13 +359,13 @@ export const RulesPage: React.FC = () => {
           <p className="mt-3 text-3xl font-bold text-[#111827] tabular-nums">
             {policyStats.groupCount}
           </p>
-          <p className="mt-1 text-xs text-[#6B7280]">Shared category defaults</p>
+          <p className="mt-1 text-xs text-[#6B7280]">Shared rules by item type</p>
         </div>
 
         <div className="acalen-card p-5">
           <div className="flex items-start justify-between">
             <span className="text-xs font-medium text-[#6B7280]">
-              Inheriting Group Policy
+              Using Category Settings
             </span>
             <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-[#ECFDF3] text-[#15803D]">
               <ShieldCheck className="h-4 w-4" />
@@ -374,13 +374,13 @@ export const RulesPage: React.FC = () => {
           <p className="mt-3 text-3xl font-bold text-[#111827] tabular-nums">
             {policyStats.inheritingCount}
           </p>
-          <p className="mt-1 text-xs text-[#15803D]">Auto-synced on group edit</p>
+          <p className="mt-1 text-xs text-[#15803D]">Updates automatically with group</p>
         </div>
 
         <div className="acalen-card p-5">
           <div className="flex items-start justify-between">
             <span className="text-xs font-medium text-[#6B7280]">
-              Custom Product Overrides
+              With Custom Settings
             </span>
             <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-[#FFF8EB] text-[#D97706]">
               <Pencil className="h-4 w-4" />
@@ -390,14 +390,14 @@ export const RulesPage: React.FC = () => {
             {policyStats.overrideCount}
           </p>
           <p className="mt-1 text-xs font-medium text-[#B4690E]">
-            Follows own policy thresholds
+            Uses its own special settings
           </p>
         </div>
 
         <div className="acalen-card p-5">
           <div className="flex items-start justify-between">
             <span className="text-xs font-medium text-[#6B7280]">
-              Active Rule Alerts
+              Active Alerts
             </span>
             <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-[#FEF2F2] text-[#C53030]">
               <ShieldAlert className="h-4 w-4" />
@@ -407,29 +407,28 @@ export const RulesPage: React.FC = () => {
             {policyStats.activeAlerts}
           </p>
           <p className="mt-1 text-xs font-medium text-[#C53030]">
-            Pending manager approval
+            Waiting for your review
           </p>
         </div>
       </div>
 
-      {/* Group / Category Default Policies Section */}
+      {/* Category Default Settings Section */}
       <div className="acalen-card p-5">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
             <h2 className="text-base font-semibold text-[#111827]">
-              Group / Category Policies (Tier 1 Defaults)
+              Category Default Settings
             </h2>
             <p className="mt-0.5 text-xs text-[#6B7280]">
-              Edit a group policy once to update all inheriting items in that category; products with a{' '}
-              <strong className="text-[#1E325C]">Custom Override</strong> follow their own policy instead.
+              Set rules once for an entire category (like all Beverages or Pastries). If you customize one product, it will follow its own rules instead.
             </p>
           </div>
           <div className="flex flex-wrap gap-2 text-[11px] text-[#334E7B]">
             <span className="rounded-md bg-[#EEF2F7] px-2.5 py-1 font-medium">
-              Guardrail 1: Expiry Surplus Suppresses Reorder
+              Tip 1: Don&apos;t buy more while old stock is about to spoil
             </span>
             <span className="rounded-md bg-[#EEF2F7] px-2.5 py-1 font-medium">
-              Guardrail 2: Markdown Floor ≥ 35% Margin
+              Tip 2: Never discount below your minimum profit %
             </span>
           </div>
         </div>
@@ -462,37 +461,37 @@ export const RulesPage: React.FC = () => {
                           : 'bg-[#E5E7EB] text-[#374151]'
                       }`}
                     >
-                      {gp.item_type === 'FINISHED_PRODUCT' ? 'Menu Group' : 'Raw / Supply'}
+                      {gp.item_type === 'FINISHED_PRODUCT' ? 'Menu Group' : 'Ingredients'}
                     </span>
                   </div>
 
                   <div className="mt-2.5 grid grid-cols-2 gap-x-2 gap-y-1 text-[11px] text-[#4B5563]">
                     <span>
-                      Reorder: <strong className="text-[#111827]">{gp.reorder_level}</strong>
+                      Restock At: <strong className="text-[#111827]">{gp.reorder_level}</strong>
                     </span>
                     <span>
-                      Safety: <strong className="text-[#111827]">{gp.safety_stock}</strong>
+                      Backup Stock: <strong className="text-[#111827]">{gp.safety_stock}</strong>
                     </span>
                     {gp.enable_margin_rule ? (
                       <span>
-                        Margin: <strong className="text-[#111827]">{gp.target_margin_pct}%</strong>
+                        Profit Goal: <strong className="text-[#111827]">{gp.target_margin_pct}%</strong>
                       </span>
                     ) : (
-                      <span className="text-[#9CA3AF]">Margin: N/A</span>
+                      <span className="text-[#9CA3AF]">Profit Goal: N/A</span>
                     )}
                     {gp.enable_expiry_rule ? (
                       <span>
-                        Expiry: <strong className="text-[#111827]">≤{gp.expiry_warning_days}d</strong>
+                        Expiry Alert: <strong className="text-[#111827]">≤{gp.expiry_warning_days}d</strong>
                       </span>
                     ) : (
-                      <span className="text-[#9CA3AF]">Expiry: Off</span>
+                      <span className="text-[#9CA3AF]">Expiry Alert: Off</span>
                     )}
                     {gp.item_type === 'FINISHED_PRODUCT' && (
                       <span className="col-span-2">
-                        Clearance Markdown:{' '}
+                        Clearance Discount:{' '}
                         <strong className="text-[#111827]">{gp.markdown_pct}%</strong>{' '}
                         <span className="text-[#9CA3AF]">
-                          (floor {gp.min_post_markdown_margin_pct}%)
+                          (min profit {gp.min_post_markdown_margin_pct}%)
                         </span>
                       </span>
                     )}
@@ -501,14 +500,14 @@ export const RulesPage: React.FC = () => {
 
                 <div className="mt-3 flex items-center justify-between border-t border-[#E8ECF2] pt-2.5 text-[11px]">
                   <span className="text-[#6B7280] tabular-nums">
-                    {inheriting} inherit · {customCount} custom
+                    {inheriting} shared · {customCount} custom
                   </span>
                   <button
                     type="button"
                     onClick={() => openGroupEditor(gp)}
                     className="font-semibold text-[#1E325C] hover:underline"
                   >
-                    Configure Group
+                    Edit Group Rules
                   </button>
                 </div>
               </div>
@@ -576,13 +575,13 @@ export const RulesPage: React.FC = () => {
           <div>
             <h2 className="text-base font-semibold text-[#111827]">
               {itemTypeTab === 'FINISHED_PRODUCT'
-                ? 'Finished Product Rule Policies (Tier 2)'
-                : 'Raw Ingredient & Supply Rule Policies (Tier 2)'}
+                ? 'Finished Menu Items — Alert Rules'
+                : 'Raw Ingredients & Supplies — Alert Rules'}
             </h2>
             <p className="text-xs text-[#6B7280]">
               {itemTypeTab === 'FINISHED_PRODUCT'
-                ? 'Evaluates stock, target gross margin %, and near-expiry retail markdown %'
-                : 'Evaluates BOM-derived 7d consumption & FEFO expiry rotation (POS retail markdowns disabled)'}
+                ? 'Checks stock levels, profit goals, and when to apply clearance discounts before items spoil'
+                : 'Checks weekly ingredient needs from recipes and warns before ingredients spoil'}
             </p>
           </div>
           <span className="text-xs text-[#6B7280] tabular-nums">
@@ -595,21 +594,21 @@ export const RulesPage: React.FC = () => {
             <thead className="border-b border-[#E8ECF2] bg-[#F9FAFB] text-[11px] font-medium text-[#6B7280]">
               <tr>
                 <th className="px-6 py-3.5">Product</th>
-                <th className="px-4 py-3.5">Policy Source</th>
-                <th className="px-4 py-3.5">Stock / Reorder / Safety</th>
+                <th className="px-4 py-3.5">Rule Applied</th>
+                <th className="px-4 py-3.5">Stock / Restock At / Backup</th>
                 {itemTypeTab === 'FINISHED_PRODUCT' ? (
                   <>
-                    <th className="px-4 py-3.5">Margin / Target</th>
-                    <th className="px-4 py-3.5">Expiry Warn</th>
-                    <th className="px-4 py-3.5">Markdown %</th>
+                    <th className="px-4 py-3.5">Profit / Goal</th>
+                    <th className="px-4 py-3.5">Expiry Alert</th>
+                    <th className="px-4 py-3.5">Clearance Discount</th>
                   </>
                 ) : (
                   <>
-                    <th className="px-4 py-3.5">Derived 7d BOM Usage</th>
-                    <th className="px-4 py-3.5">Expiry Warn</th>
+                    <th className="px-4 py-3.5">Est. 7-Day Usage</th>
+                    <th className="px-4 py-3.5">Expiry Alert</th>
                   </>
                 )}
-                <th className="px-4 py-3.5">Rule Evaluation</th>
+                <th className="px-4 py-3.5">Status</th>
                 <th className="px-6 py-3.5 text-right">Edit</th>
               </tr>
             </thead>
@@ -627,11 +626,11 @@ export const RulesPage: React.FC = () => {
                   <td className="px-4 py-3.5">
                     {eff.source === 'GROUP_DEFAULT' ? (
                       <span className="inline-flex items-center rounded-md bg-[#EEF2F7] px-2 py-0.5 text-[11px] font-medium text-[#334E7B]">
-                        Inherits {eff.group_name}
+                        Uses {eff.group_name} Rules
                       </span>
                     ) : (
                       <span className="inline-flex items-center rounded-md border border-[#FDE68A] bg-[#FFF8EB] px-2 py-0.5 text-[11px] font-semibold text-[#B4690E]">
-                        Custom Override
+                        Own Custom Rules
                       </span>
                     )}
                   </td>
@@ -640,7 +639,7 @@ export const RulesPage: React.FC = () => {
                       {formatQty(stock, product.unit_label)}
                     </span>
                     <span className="block text-[11px] text-[#6B7280]">
-                      R: {eff.reorder_level} · S: {eff.safety_stock}
+                      Restock ≤ {eff.reorder_level} · Backup {eff.safety_stock}
                     </span>
                   </td>
 
@@ -726,7 +725,7 @@ export const RulesPage: React.FC = () => {
                       className="inline-flex items-center gap-1 rounded-lg border border-[#E2E8F0] bg-white px-2.5 py-1.5 text-[11px] font-semibold text-[#1E325C] hover:bg-[#EFF3F9]"
                     >
                       <Pencil className="h-3 w-3" />
-                      Configure
+                      Edit Rules
                     </button>
                   </td>
                 </tr>
@@ -736,7 +735,7 @@ export const RulesPage: React.FC = () => {
         </div>
       </div>
 
-      {/* Group Policy Editor Modal */}
+      {/* Group Policy Editor Modal (Plain-English Labels & Helper Explanations) */}
       {editingGroup && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/45 p-4"
@@ -744,14 +743,14 @@ export const RulesPage: React.FC = () => {
           aria-modal="true"
           aria-labelledby="edit-group-title"
         >
-          <div className="w-full max-w-lg rounded-2xl border border-[#E8ECF2] bg-white p-6 shadow-2xl">
+          <div className="max-h-[90vh] w-full max-w-xl overflow-y-auto rounded-2xl border border-[#E8ECF2] bg-white p-6 shadow-2xl">
             <div className="flex items-center justify-between border-b border-[#F1F5F9] pb-3">
               <div>
                 <h2 id="edit-group-title" className="text-base font-semibold text-[#111827]">
-                  Configure Group Policy · {editingGroup.category_name}
+                  Edit Group Rules · {editingGroup.category_name}
                 </h2>
                 <p className="text-xs text-[#6B7280]">
-                  Updates all inheriting products in {editingGroup.category_name}
+                  Applies to all {editingGroup.category_name} items unless an item has its own custom settings
                 </p>
               </div>
               <button
@@ -770,11 +769,14 @@ export const RulesPage: React.FC = () => {
                 </p>
               )}
 
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                 <div>
-                  <label className="mb-1 block font-medium text-[#374151]">
-                    Default Reorder Level
+                  <label className="block font-semibold text-[#111827]">
+                    Restock Alert Level
                   </label>
+                  <p className="mb-1.5 text-[11px] text-[#6B7280]">
+                    Warn me to buy more when stock drops to this number
+                  </p>
                   <input
                     type="number"
                     min={0}
@@ -782,13 +784,16 @@ export const RulesPage: React.FC = () => {
                     onChange={(e) =>
                       setGroupForm({ ...groupForm, reorder_level: e.target.value })
                     }
-                    className="w-full rounded-lg border border-[#D1D5DB] px-3 py-2 tabular-nums"
+                    className="w-full rounded-lg border border-[#D1D5DB] px-3 py-2 tabular-nums focus:border-[#1E325C] focus:outline-none"
                   />
                 </div>
                 <div>
-                  <label className="mb-1 block font-medium text-[#374151]">
-                    Default Safety Stock
+                  <label className="block font-semibold text-[#111827]">
+                    Emergency Backup Stock
                   </label>
+                  <p className="mb-1.5 text-[11px] text-[#6B7280]">
+                    Extra buffer stock kept so you never run out completely
+                  </p>
                   <input
                     type="number"
                     min={0}
@@ -796,16 +801,19 @@ export const RulesPage: React.FC = () => {
                     onChange={(e) =>
                       setGroupForm({ ...groupForm, safety_stock: e.target.value })
                     }
-                    className="w-full rounded-lg border border-[#D1D5DB] px-3 py-2 tabular-nums"
+                    className="w-full rounded-lg border border-[#D1D5DB] px-3 py-2 tabular-nums focus:border-[#1E325C] focus:outline-none"
                   />
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                 <div>
-                  <label className="mb-1 block font-medium text-[#374151]">
-                    Target Margin %
+                  <label className="block font-semibold text-[#111827]">
+                    Desired Profit (%)
                   </label>
+                  <p className="mb-1.5 text-[11px] text-[#6B7280]">
+                    Minimum profit % you want from each sale
+                  </p>
                   <input
                     type="number"
                     min={1}
@@ -818,13 +826,16 @@ export const RulesPage: React.FC = () => {
                         target_margin_pct: e.target.value,
                       })
                     }
-                    className="w-full rounded-lg border border-[#D1D5DB] px-2.5 py-2 tabular-nums disabled:bg-[#F3F4F6]"
+                    className="w-full rounded-lg border border-[#D1D5DB] px-3 py-2 tabular-nums disabled:bg-[#F3F4F6] focus:border-[#1E325C] focus:outline-none"
                   />
                 </div>
                 <div>
-                  <label className="mb-1 block font-medium text-[#374151]">
-                    Expiry Warn (d)
+                  <label className="block font-semibold text-[#111827]">
+                    Warn Before Expiry (Days)
                   </label>
+                  <p className="mb-1.5 text-[11px] text-[#6B7280]">
+                    How many days early to alert you before items spoil
+                  </p>
                   <input
                     type="number"
                     min={1}
@@ -836,13 +847,16 @@ export const RulesPage: React.FC = () => {
                         expiry_warning_days: e.target.value,
                       })
                     }
-                    className="w-full rounded-lg border border-[#D1D5DB] px-2.5 py-2 tabular-nums"
+                    className="w-full rounded-lg border border-[#D1D5DB] px-3 py-2 tabular-nums focus:border-[#1E325C] focus:outline-none"
                   />
                 </div>
                 <div>
-                  <label className="mb-1 block font-medium text-[#374151]">
-                    Markdown %
+                  <label className="block font-semibold text-[#111827]">
+                    Clearance Discount (%)
                   </label>
+                  <p className="mb-1.5 text-[11px] text-[#6B7280]">
+                    Price-cut % offered to sell items fast before they spoil
+                  </p>
                   <input
                     type="number"
                     min={0}
@@ -852,13 +866,16 @@ export const RulesPage: React.FC = () => {
                     onChange={(e) =>
                       setGroupForm({ ...groupForm, markdown_pct: e.target.value })
                     }
-                    className="w-full rounded-lg border border-[#D1D5DB] px-2.5 py-2 tabular-nums disabled:bg-[#F3F4F6]"
+                    className="w-full rounded-lg border border-[#D1D5DB] px-3 py-2 tabular-nums disabled:bg-[#F3F4F6] focus:border-[#1E325C] focus:outline-none"
                   />
                 </div>
                 <div>
-                  <label className="mb-1 block font-medium text-[#374151]">
-                    Margin Floor %
+                  <label className="block font-semibold text-[#111827]">
+                    Lowest Allowed Profit (%)
                   </label>
+                  <p className="mb-1.5 text-[11px] text-[#6B7280]">
+                    Stop discounting if profit would drop below this %
+                  </p>
                   <input
                     type="number"
                     min={0}
@@ -871,14 +888,14 @@ export const RulesPage: React.FC = () => {
                         min_post_markdown_margin_pct: e.target.value,
                       })
                     }
-                    className="w-full rounded-lg border border-[#D1D5DB] px-2.5 py-2 tabular-nums disabled:bg-[#F3F4F6]"
+                    className="w-full rounded-lg border border-[#D1D5DB] px-3 py-2 tabular-nums disabled:bg-[#F3F4F6] focus:border-[#1E325C] focus:outline-none"
                   />
                 </div>
               </div>
 
-              <div className="space-y-2 rounded-xl border border-[#E8ECF2] bg-[#F9FAFB] p-3">
+              <div className="space-y-2 rounded-xl border border-[#E8ECF2] bg-[#F9FAFB] p-3.5">
                 <p className="text-[11px] font-semibold text-[#374151] uppercase">
-                  Active Rules &amp; Precedence for {editingGroup.category_name}
+                  Alerts Turned On for {editingGroup.category_name}
                 </p>
                 <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
                   <label className="flex items-center gap-2">
@@ -892,7 +909,7 @@ export const RulesPage: React.FC = () => {
                         })
                       }
                     />
-                    <span>Enable Stock Shortage Rule</span>
+                    <span>Warn when running low on stock</span>
                   </label>
                   {editingGroup.item_type === 'FINISHED_PRODUCT' && (
                     <label className="flex items-center gap-2">
@@ -906,7 +923,7 @@ export const RulesPage: React.FC = () => {
                           })
                         }
                       />
-                      <span>Enable Target Margin Rule</span>
+                      <span>Warn when profit is too low</span>
                     </label>
                   )}
                   <label className="flex items-center gap-2">
@@ -920,7 +937,7 @@ export const RulesPage: React.FC = () => {
                         })
                       }
                     />
-                    <span>Enable Expiry Warning Rule</span>
+                    <span>Warn before items expire</span>
                   </label>
                   <label className="flex items-center gap-2">
                     <input
@@ -933,7 +950,7 @@ export const RulesPage: React.FC = () => {
                         })
                       }
                     />
-                    <span>Suppress Reorder on Expiry Surplus</span>
+                    <span>Don&apos;t buy more while items are expiring soon</span>
                   </label>
                 </div>
               </div>
@@ -950,7 +967,7 @@ export const RulesPage: React.FC = () => {
                   type="submit"
                   className="rounded-lg bg-[#1E325C] px-4 py-2 font-semibold text-white hover:bg-[#162647]"
                 >
-                  Apply to Group
+                  Save Group Rules
                 </button>
               </div>
             </form>
@@ -958,7 +975,7 @@ export const RulesPage: React.FC = () => {
         </div>
       )}
 
-      {/* Upgraded Per-Product Policy Editor + Live Plain-English IF-THEN What-If Preview */}
+      {/* Per-Product Policy Editor + Live Check Preview */}
       {editingProduct && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/45 p-4"
@@ -971,16 +988,16 @@ export const RulesPage: React.FC = () => {
               <div>
                 <div className="flex items-center gap-2">
                   <h2 id="edit-rule-title" className="text-base font-semibold text-[#111827]">
-                    Configure Rules · {editingProduct.product_name}
+                    Edit Rules · {editingProduct.product_name}
                   </h2>
                   <span className="rounded bg-[#EFF3F9] px-2 py-0.5 text-[10px] font-semibold text-[#1E325C]">
                     {editingProduct.item_type === 'FINISHED_PRODUCT'
-                      ? 'Finished Product'
+                      ? 'Menu Item'
                       : 'Raw Ingredient'}
                   </span>
                 </div>
                 <p className="text-xs text-[#6B7280]">
-                  {editingProduct.sku} · Category: {editingProduct.category_name} · Unit:{' '}
+                  {editingProduct.sku} · Category: {editingProduct.category_name} · Measured in:{' '}
                   {editingProduct.unit_label}
                 </p>
               </div>
@@ -1003,9 +1020,9 @@ export const RulesPage: React.FC = () => {
                 </p>
               )}
 
-              {/* Policy Mode Switch: Inherit Group vs Custom Override */}
+              {/* Policy Mode Switch */}
               <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-[#E8ECF2] bg-[#F8FAFC] p-3.5">
-                <div className="flex items-center gap-2">
+                <div className="flex flex-wrap items-center gap-2">
                   <button
                     type="button"
                     onClick={() => handleToggleGroupInheritance(true)}
@@ -1015,7 +1032,7 @@ export const RulesPage: React.FC = () => {
                         : 'border border-[#E2E8F0] bg-white text-[#4B5563]'
                     }`}
                   >
-                    Inherit {editingProduct.category_name} Group Policy
+                    Follow {editingProduct.category_name} Group Rules
                   </button>
                   <button
                     type="button"
@@ -1026,7 +1043,7 @@ export const RulesPage: React.FC = () => {
                         : 'border border-[#E2E8F0] bg-white text-[#4B5563]'
                     }`}
                   >
-                    Custom Product Override
+                    Use Own Custom Rules
                   </button>
                 </div>
                 {!useGroupDefault && (
@@ -1036,12 +1053,12 @@ export const RulesPage: React.FC = () => {
                     className="inline-flex items-center gap-1 text-[11px] font-semibold text-[#1E325C] hover:underline"
                   >
                     <RotateCcw className="h-3 w-3" />
-                    Reset to Group Default
+                    Reset to Category Rules
                   </button>
                 )}
               </div>
 
-              {/* Numeric Threshold Inputs */}
+              {/* Numeric Threshold Inputs with Layman Explanations */}
               <div
                 className={`space-y-3 rounded-xl border p-4 ${
                   useGroupDefault
@@ -1049,24 +1066,27 @@ export const RulesPage: React.FC = () => {
                     : 'border-[#FDE68A] bg-[#FFFBEB]/40'
                 }`}
               >
-                <div className="flex items-center justify-between">
+                <div className="flex flex-wrap items-center justify-between gap-2">
                   <p className="font-semibold text-[#111827]">
                     {useGroupDefault
-                      ? `Inherited Thresholds (${editingProduct.category_name} Group)`
-                      : 'Custom Override Thresholds'}
+                      ? `Using ${editingProduct.category_name} Group Rules`
+                      : `Custom Rules Only for ${editingProduct.product_name}`}
                   </p>
                   {useGroupDefault && (
                     <span className="text-[11px] text-[#6B7280]">
-                      Editing any field switches this item to Custom Override
+                      Changing any number switches this item to its own custom rules
                     </span>
                   )}
                 </div>
 
-                <div className="grid grid-cols-2 gap-3">
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                   <div>
-                    <label className="mb-1 block font-medium text-[#374151]">
-                      Reorder Level ({editingProduct.unit_label})
+                    <label className="block font-semibold text-[#111827]">
+                      Restock Alert Level ({editingProduct.unit_label})
                     </label>
+                    <p className="mb-1 text-[11px] text-[#6B7280]">
+                      Warn me to buy more when stock drops to this number
+                    </p>
                     <input
                       type="number"
                       min={0}
@@ -1079,9 +1099,12 @@ export const RulesPage: React.FC = () => {
                     />
                   </div>
                   <div>
-                    <label className="mb-1 block font-medium text-[#374151]">
-                      Safety Stock ({editingProduct.unit_label})
+                    <label className="block font-semibold text-[#111827]">
+                      Emergency Backup Stock ({editingProduct.unit_label})
                     </label>
+                    <p className="mb-1 text-[11px] text-[#6B7280]">
+                      Extra buffer stock kept so you never run out
+                    </p>
                     <input
                       type="number"
                       min={0}
@@ -1095,12 +1118,15 @@ export const RulesPage: React.FC = () => {
                   </div>
                 </div>
 
-                <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                   {editingProduct.item_type === 'FINISHED_PRODUCT' && (
                     <div>
-                      <label className="mb-1 block font-medium text-[#374151]">
-                        Target Margin %
+                      <label className="block font-semibold text-[#111827]">
+                        Desired Profit (%)
                       </label>
+                      <p className="mb-1 text-[11px] text-[#6B7280]">
+                        How much profit you want to earn on each sale
+                      </p>
                       <input
                         type="number"
                         min={1}
@@ -1113,16 +1139,19 @@ export const RulesPage: React.FC = () => {
                             target_margin_pct: e.target.value,
                           });
                         }}
-                        className="w-full rounded-lg border border-[#D1D5DB] bg-white px-2.5 py-2 tabular-nums focus:border-[#1E325C] focus:outline-none"
+                        className="w-full rounded-lg border border-[#D1D5DB] bg-white px-3 py-2 tabular-nums focus:border-[#1E325C] focus:outline-none"
                       />
                     </div>
                   )}
 
                   {editingProduct.is_perishable && (
                     <div>
-                      <label className="mb-1 block font-medium text-[#374151]">
-                        Expiry Warn (d)
+                      <label className="block font-semibold text-[#111827]">
+                        Warn Before Expiry (Days)
                       </label>
+                      <p className="mb-1 text-[11px] text-[#6B7280]">
+                        Days early to alert you before items spoil
+                      </p>
                       <input
                         type="number"
                         min={1}
@@ -1135,7 +1164,7 @@ export const RulesPage: React.FC = () => {
                             expiry_warning_days: e.target.value,
                           });
                         }}
-                        className="w-full rounded-lg border border-[#D1D5DB] bg-white px-2.5 py-2 tabular-nums focus:border-[#1E325C] focus:outline-none"
+                        className="w-full rounded-lg border border-[#D1D5DB] bg-white px-3 py-2 tabular-nums focus:border-[#1E325C] focus:outline-none"
                       />
                     </div>
                   )}
@@ -1144,9 +1173,12 @@ export const RulesPage: React.FC = () => {
                     editingProduct.is_perishable && (
                       <>
                         <div>
-                          <label className="mb-1 block font-medium text-[#374151]">
-                            Markdown %
+                          <label className="block font-semibold text-[#111827]">
+                            Clearance Discount (%)
                           </label>
+                          <p className="mb-1 text-[11px] text-[#6B7280]">
+                            Price-cut % offered before items expire
+                          </p>
                           <input
                             type="number"
                             min={0}
@@ -1159,13 +1191,16 @@ export const RulesPage: React.FC = () => {
                                 markdown_pct: e.target.value,
                               });
                             }}
-                            className="w-full rounded-lg border border-[#D1D5DB] bg-white px-2.5 py-2 tabular-nums focus:border-[#1E325C] focus:outline-none"
+                            className="w-full rounded-lg border border-[#D1D5DB] bg-white px-3 py-2 tabular-nums focus:border-[#1E325C] focus:outline-none"
                           />
                         </div>
                         <div>
-                          <label className="mb-1 block font-medium text-[#374151]">
-                            Margin Floor %
+                          <label className="block font-semibold text-[#111827]">
+                            Lowest Allowed Profit (%)
                           </label>
+                          <p className="mb-1 text-[11px] text-[#6B7280]">
+                            Stop discounting if profit drops below this %
+                          </p>
                           <input
                             type="number"
                             min={0}
@@ -1178,7 +1213,7 @@ export const RulesPage: React.FC = () => {
                                 min_post_markdown_margin_pct: e.target.value,
                               });
                             }}
-                            className="w-full rounded-lg border border-[#D1D5DB] bg-white px-2.5 py-2 tabular-nums focus:border-[#1E325C] focus:outline-none"
+                            className="w-full rounded-lg border border-[#D1D5DB] bg-white px-3 py-2 tabular-nums focus:border-[#1E325C] focus:outline-none"
                           />
                         </div>
                       </>
@@ -1186,7 +1221,7 @@ export const RulesPage: React.FC = () => {
                 </div>
 
                 {/* Rule Toggles */}
-                <div className="flex flex-wrap gap-4 pt-1 text-[11px] text-[#374151]">
+                <div className="grid grid-cols-1 gap-2 pt-1 text-[11px] text-[#374151] sm:grid-cols-2">
                   <label className="flex items-center gap-1.5">
                     <input
                       type="checkbox"
@@ -1199,7 +1234,7 @@ export const RulesPage: React.FC = () => {
                         });
                       }}
                     />
-                    Stock Rule
+                    Warn when running low on stock
                   </label>
                   {editingProduct.item_type === 'FINISHED_PRODUCT' && (
                     <label className="flex items-center gap-1.5">
@@ -1214,7 +1249,7 @@ export const RulesPage: React.FC = () => {
                           });
                         }}
                       />
-                      Margin Rule
+                      Warn when profit is too low
                     </label>
                   )}
                   {editingProduct.is_perishable && (
@@ -1230,7 +1265,7 @@ export const RulesPage: React.FC = () => {
                           });
                         }}
                       />
-                      Expiry Rule
+                      Warn before items expire
                     </label>
                   )}
                   <label className="flex items-center gap-1.5">
@@ -1245,24 +1280,24 @@ export const RulesPage: React.FC = () => {
                         });
                       }}
                     />
-                    Hold Reorder on Expiry Surplus
+                    Don&apos;t buy more while items are expiring soon
                   </label>
                 </div>
               </div>
 
-              {/* Live Plain-English IF-THEN What-If Preview Panel */}
+              {/* Live Check Preview Box */}
               {liveWhatIfDiagnostic && (
                 <div className="rounded-xl border border-[#D8E1EE] bg-[#F4F7FC] p-4">
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <div className="flex items-center gap-2 font-semibold text-[#1E325C]">
                       <Sparkles className="h-4 w-4" />
-                      <span>Live IF-THEN Rule Evaluation Preview</span>
+                      <span>Live Check (Before You Save)</span>
                     </div>
                     <div className="flex flex-wrap gap-1.5">
                       {liveWhatIfDiagnostic.triggeredCodes.length === 0 ? (
                         <span className="inline-flex items-center gap-1 rounded-full bg-[#ECFDF3] px-2.5 py-0.5 text-[11px] font-semibold text-[#15803D]">
                           <CheckCircle2 className="h-3 w-3" />
-                          Healthy (No Alerts)
+                          All Good (No Alerts)
                         </span>
                       ) : (
                         liveWhatIfDiagnostic.triggeredCodes.map((c) => (
@@ -1274,15 +1309,15 @@ export const RulesPage: React.FC = () => {
 
                   <div className="mt-2.5 space-y-1.5 text-[11px] leading-relaxed text-[#334155]">
                     <p>
-                      <strong>IF Stock Rule:</strong>{' '}
+                      <strong>Stock Check:</strong>{' '}
                       {liveWhatIfDiagnostic.checks.stockCheckText}
                     </p>
                     <p>
-                      <strong>IF Margin Rule:</strong>{' '}
+                      <strong>Profit Check:</strong>{' '}
                       {liveWhatIfDiagnostic.checks.marginCheckText}
                     </p>
                     <p>
-                      <strong>IF Expiry Rule:</strong>{' '}
+                      <strong>Expiry Check:</strong>{' '}
                       {liveWhatIfDiagnostic.checks.expiryCheckText}
                     </p>
                     {liveWhatIfDiagnostic.checks.precedenceNote && (
@@ -1292,7 +1327,7 @@ export const RulesPage: React.FC = () => {
                     )}
                     {liveWhatIfDiagnostic.recommendation && (
                       <p className="mt-2 rounded-lg border border-[#D8E1EE] bg-white p-2.5 text-[#111827]">
-                        <strong>THEN Recommended Action:</strong>{' '}
+                        <strong>Suggested Action:</strong>{' '}
                         {liveWhatIfDiagnostic.recommendation.recommended_action}
                       </p>
                     )}
@@ -1312,7 +1347,7 @@ export const RulesPage: React.FC = () => {
                   type="submit"
                   className="rounded-lg bg-[#1E325C] px-4 py-2 font-semibold text-white hover:bg-[#162647]"
                 >
-                  Save &amp; Re-Evaluate
+                  Save &amp; Update Alerts
                 </button>
               </div>
             </form>

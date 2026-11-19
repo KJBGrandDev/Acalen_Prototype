@@ -524,10 +524,10 @@ export const InventoryPage: React.FC = () => {
 
         <p className="text-xs text-[#6B7280]">
           {itemTypeTab === 'FINISHED_PRODUCT'
-            ? 'Sellable POS menu items linked to micro-ingredient BOM recipes'
+            ? 'Menu items sold at the counter and linked to ingredient recipes'
             : itemTypeTab === 'RAW_INGREDIENT'
-              ? 'Micro-ingredients & packaging tracked via derived menu forecast usage'
-              : 'Combined finished goods & raw ingredient inventory'}
+              ? 'Ingredients & supplies estimated from menu sales forecasts'
+              : 'Combined finished menu items & raw ingredients'}
         </p>
       </div>
 
@@ -562,7 +562,7 @@ export const InventoryPage: React.FC = () => {
           <p className="mt-3 text-3xl font-bold text-[#111827] tabular-nums">
             {kpis.lowStock}
           </p>
-          <p className="mt-1 text-xs font-medium text-[#B4690E]">Below safety stock</p>
+          <p className="mt-1 text-xs font-medium text-[#B4690E]">Below backup stock</p>
         </div>
 
         <div className="acalen-card p-5">
@@ -684,7 +684,7 @@ export const InventoryPage: React.FC = () => {
             className="inline-flex items-center gap-1.5 rounded-lg border border-[#E8ECF2] bg-white px-4 py-2 text-xs font-semibold text-[#111827] shadow-xs hover:bg-[#F9FAFB]"
           >
             <Download className="h-3.5 w-3.5 text-[#4B5563]" />
-            Stock In
+            Add Delivery
           </button>
           <button
             type="button"
@@ -695,7 +695,7 @@ export const InventoryPage: React.FC = () => {
             className="inline-flex items-center gap-1.5 rounded-lg border border-[#E8ECF2] bg-white px-4 py-2 text-xs font-semibold text-[#111827] shadow-xs hover:bg-[#F9FAFB]"
           >
             <ArrowLeftRight className="h-3.5 w-3.5 text-[#4B5563]" />
-            Stock Transfer
+            Move Stock
           </button>
           <button
             type="button"
@@ -706,7 +706,7 @@ export const InventoryPage: React.FC = () => {
             className="inline-flex items-center gap-1.5 rounded-lg border border-[#E8ECF2] bg-white px-4 py-2 text-xs font-semibold text-[#111827] shadow-xs hover:bg-[#F9FAFB]"
           >
             <Trash2 className="h-3.5 w-3.5 text-[#4B5563]" />
-            Record Wastage
+            Log Spoilage / Loss
           </button>
         </div>
       </div>
@@ -730,11 +730,11 @@ export const InventoryPage: React.FC = () => {
           <table className="w-full text-left text-xs">
             <thead className="border-b border-[#E8ECF2] bg-[#F9FAFB] text-[11px] font-medium text-[#6B7280]">
               <tr>
-                <th className="px-6 py-3.5">Product &amp; Micro-Link</th>
+                <th className="px-6 py-3.5">Product &amp; Recipe</th>
                 <th className="px-4 py-3.5">Category</th>
                 <th className="px-4 py-3.5">Current Stock</th>
                 <th className="px-4 py-3.5">
-                  {itemTypeTab === 'RAW_INGREDIENT' ? 'Derived 7d Usage' : 'Safety Stock'}
+                  {itemTypeTab === 'RAW_INGREDIENT' ? 'Est. 7-Day Usage' : 'Backup Stock'}
                 </th>
                 <th className="px-4 py-3.5">Unit Cost</th>
                 <th className="px-4 py-3.5">Batch/Expiration</th>
@@ -782,11 +782,11 @@ export const InventoryPage: React.FC = () => {
                             </p>
                             {product.item_type === 'FINISHED_PRODUCT' ? (
                               <span className="rounded bg-[#EFF3F9] px-1.5 py-0.5 text-[10px] font-medium text-[#1E325C]">
-                                BOM · {recipeCount} ing
+                                Recipe · {recipeCount} items
                               </span>
                             ) : (
                               <span className="rounded bg-[#F3F4F6] px-1.5 py-0.5 text-[10px] font-medium text-[#4B5563]">
-                                {product.is_perishable ? 'Raw Ingredient' : 'Non-Perishable'}
+                                {product.is_perishable ? 'Ingredient' : 'Supply'}
                               </span>
                             )}
                           </div>
@@ -813,7 +813,7 @@ export const InventoryPage: React.FC = () => {
                                 / 7d
                               </p>
                               <p className="text-[10px] text-[#9CA3AF]">
-                                Safety {safetyStock} {product.unit_label}
+                                Backup {safetyStock} {product.unit_label}
                               </p>
                             </div>
                           ) : (
@@ -1022,10 +1022,10 @@ export const InventoryPage: React.FC = () => {
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <div>
                       <h3 className="text-xs font-semibold text-[#111827] uppercase">
-                        Micro-Ingredients Recipe (Bill of Materials)
+                        Ingredients Used per Serving (Recipe)
                       </h3>
                       <p className="text-[11px] text-[#6B7280]">
-                        Deducted FEFO on every POS sale and exploded into raw ingredient demand forecasts
+                        Automatically subtracts ingredients on every sale and estimates weekly supply needs
                       </p>
                     </div>
                     {!editingRecipe ? (
@@ -1062,7 +1062,7 @@ export const InventoryPage: React.FC = () => {
                           }}
                           className="rounded-lg bg-[#1E325C] px-3 py-1 text-[11px] font-semibold text-white hover:bg-[#162647]"
                         >
-                          Save BOM
+                          Save Recipe
                         </button>
                       </div>
                     )}
@@ -1294,7 +1294,7 @@ export const InventoryPage: React.FC = () => {
                 inspectedProduct.derivedForecast && (
                   <div className="rounded-xl border border-[#E8ECF2] bg-[#F9FAFB] p-4">
                     <h3 className="text-xs font-semibold text-[#111827] uppercase">
-                      Used In Finished Menu Products (Derived 7-Day Forecast)
+                      Used In Menu Items (Estimated 7-Day Supply Needed)
                     </h3>
                     <p className="mt-0.5 text-[11px] text-[#6B7280]">
                       Total expected 7d consumption:{' '}
@@ -1354,7 +1354,7 @@ export const InventoryPage: React.FC = () => {
 
               <div>
                 <h3 className="text-xs font-semibold text-[#374151] uppercase">
-                  FEFO Batch Breakdown
+                  Stock Batches (Oldest Expiry Used First)
                 </h3>
                 <div className="mt-2 overflow-hidden rounded-xl border border-[#E8ECF2]">
                   <table className="w-full text-left text-xs">
@@ -1514,7 +1514,7 @@ export const InventoryPage: React.FC = () => {
                       className="rounded border-[#D1D5DB]"
                     />
                     <span className="font-medium text-[#374151]">
-                      Perishable (Track Expiry Alerts)
+                      Can Spoil (Track Expiry Date)
                     </span>
                   </label>
                 </div>
@@ -1654,7 +1654,7 @@ export const InventoryPage: React.FC = () => {
                 </div>
                 <div>
                   <label className="mb-1 block font-medium text-[#374151]">
-                    Safety Stock
+                    Backup Stock
                   </label>
                   <input
                     type="number"
@@ -1667,7 +1667,7 @@ export const InventoryPage: React.FC = () => {
                 </div>
                 <div>
                   <label className="mb-1 block font-medium text-[#374151]">
-                    Reorder Level
+                    Restock Alert Level
                   </label>
                   <input
                     type="number"
@@ -1967,8 +1967,8 @@ export const InventoryPage: React.FC = () => {
             <div className="flex items-center justify-between border-b border-[#F1F5F9] pb-3">
               <h2 id="movement-title" className="text-base font-semibold text-[#111827]">
                 {activeModal === 'transfer'
-                  ? 'Log Stock Transfer'
-                  : 'Record Wastage / Shrinkage'}
+                  ? 'Move Stock Between Areas'
+                  : 'Log Spoilage or Missing Stock'}
               </h2>
               <button
                 type="button"
@@ -2082,8 +2082,8 @@ export const InventoryPage: React.FC = () => {
                     }
                     className="w-full rounded-lg border border-[#D1D5DB] px-3 py-2"
                   >
-                    <option value="WASTAGE">Wastage / Spoilage</option>
-                    <option value="SHRINKAGE">Audit Shrinkage / Variance</option>
+                    <option value="WASTAGE">Spoiled / Damaged Goods</option>
+                    <option value="SHRINKAGE">Missing Stock (Count Variance)</option>
                   </select>
                 </div>
               )}

@@ -507,33 +507,33 @@ export function evaluateSingleProductRule(
     isFinished &&
     marginPct < effectiveRule.target_margin_pct;
 
-  // Diagnostic plain-English sentences for Live What-If UI
+  // Diagnostic plain-English sentences for Live Check UI
   const stockCheckText = !effectiveRule.enable_stock_rule
-    ? 'Stock Replenishment Rule is disabled.'
+    ? 'Low-stock warning is turned off for this item.'
     : suppressedByExpiry
-      ? `Suppressed by Precedence Rule: ${formatQty(currentStock, product.unit_label)} on hand, but ${formatQty(estimatedSurplus, product.unit_label)} near-expiry surplus exists in ${earliestBatch?.batch_number}.`
+      ? `Hold off buying more: ${formatQty(currentStock, product.unit_label)} is on hand, and ${formatQty(estimatedSurplus, product.unit_label)} in ${earliestBatch?.batch_number} may spoil soon.`
       : isStockShortage
-        ? `TRIGGERED: Stock (${formatQty(currentStock, product.unit_label)}) ≤ reorder (${effectiveRule.reorder_level}) or projected ending < safety (${effectiveRule.safety_stock}) vs ${formatQty(predicted7d, product.unit_label)} 7d demand.`
-        : `OK: Stock (${formatQty(currentStock, product.unit_label)}) covers reorder (${effectiveRule.reorder_level}) & safety (${effectiveRule.safety_stock}).`;
+        ? `Low stock: ${formatQty(currentStock, product.unit_label)} left is at or below your restock alert (${effectiveRule.reorder_level}) or backup level (${effectiveRule.safety_stock}).`
+        : `Enough stock: ${formatQty(currentStock, product.unit_label)} left is above your restock alert (${effectiveRule.reorder_level}) and backup stock (${effectiveRule.safety_stock}).`;
 
   const marginCheckText = !isFinished
-    ? 'Not applicable to Raw Ingredients / Supplies.'
+    ? 'Not used for raw ingredients or supplies.'
     : !effectiveRule.enable_margin_rule
-      ? 'Target Margin Rule is disabled.'
+      ? 'Profit goal check is turned off for this item.'
       : isBelowMargin
-        ? `TRIGGERED: Margin ${marginPct.toFixed(1)}% is below ${effectiveRule.target_margin_pct}% target (Cost ${formatPeso(product.unit_cost)} vs Price ${formatPeso(activePrice)}).`
-        : `OK: Margin ${marginPct.toFixed(1)}% meets ≥ ${effectiveRule.target_margin_pct}% target.`;
+        ? `Profit is too low: ${marginPct.toFixed(1)}% profit is under your ${effectiveRule.target_margin_pct}% goal (Cost ${formatPeso(product.unit_cost)} vs Selling Price ${formatPeso(activePrice)}).`
+        : `Profit looks good: ${marginPct.toFixed(1)}% meets your ${effectiveRule.target_margin_pct}% goal.`;
 
   const expiryCheckText = !product.is_perishable
-    ? 'Non-perishable item (expiry alerts disabled).'
+    ? 'Does not spoil (no expiry check needed).'
     : !effectiveRule.enable_expiry_rule
-      ? 'Expiry & Markdown Rule is disabled.'
+      ? 'Expiry warning is turned off for this item.'
       : isExpiryRisk
-        ? `TRIGGERED: ${earliestBatch?.batch_number} expires in ${Math.max(0, daysLeft)}d (≤ ${effectiveRule.expiry_warning_days}d window).`
-        : `OK: Earliest batch expires in ${daysLeft}d (> ${effectiveRule.expiry_warning_days}d window).`;
+        ? `Expiring soon: ${earliestBatch?.batch_number} expires in ${Math.max(0, daysLeft)} day(s) (within your ${effectiveRule.expiry_warning_days}-day alert window).`
+        : `Fresh stock: earliest batch expires in ${daysLeft} days (outside your ${effectiveRule.expiry_warning_days}-day alert window).`;
 
   const precedenceNote = suppressedByExpiry
-    ? 'Conflict Rule Active: Near-expiry surplus suppresses new purchase reorder until expiring batch sells down.'
+    ? "Smart Pause: We paused 'buy more' alerts because old stock is expiring soon — sell existing stock first."
     : null;
 
   const triggeredCodes: RuleTriggeredCode[] = [];

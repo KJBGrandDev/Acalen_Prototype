@@ -49,10 +49,10 @@ export const AuditLogModal: React.FC<AuditLogModalProps> = ({ open, onClose }) =
             </div>
             <div>
               <h2 id="audit-log-title" className="text-base font-semibold text-[#111827]">
-                System Audit &amp; Activity Log
+                Activity History (Audit Log)
               </h2>
               <p className="text-xs text-[#6B7280]">
-                Middleware transaction, RBAC &amp; decision-support audit trail (Republic Act No. 10173 compliance)
+                Record of sales, stock changes, rule updates, and system checks (RA 10173 compliant)
               </p>
             </div>
           </div>

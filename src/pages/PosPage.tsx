@@ -142,7 +142,7 @@ export const PosPage: React.FC = () => {
         </div>
 
         <p className="text-xs text-[#6B7280]">
-          FEFO batch deduction active · Cash &amp; E-Wallet accepted
+          Oldest stock used first automatically · Cash &amp; E-Wallet accepted
         </p>
       </div>
 

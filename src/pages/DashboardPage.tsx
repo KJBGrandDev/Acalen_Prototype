@@ -153,7 +153,7 @@ export const DashboardPage: React.FC = () => {
         >
           <div className="flex items-start justify-between">
             <span className="text-xs font-medium text-[#6B7280]">
-              Items Below Safety Stock
+              Low Stock Alerts
             </span>
             <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-[#FFF8EB] text-[#D97706]">
               <Box className="h-4 w-4" />
@@ -164,7 +164,7 @@ export const DashboardPage: React.FC = () => {
           </p>
           <p className="mt-1.5 flex items-center gap-1.5 text-xs font-medium text-[#B4690E]">
             <span className="h-1.5 w-1.5 rounded-full bg-[#D97706]" />
-            Requires attention
+            Below backup stock
           </p>
         </button>
 

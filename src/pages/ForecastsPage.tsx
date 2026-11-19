@@ -300,24 +300,21 @@ export const ForecastsPage: React.FC = () => {
         </div>
       </div>
 
-      {/* Model Comparison & >=6-Month Historical Readiness Strip (SIA 1 Objectives #3 & Lim #1) */}
+      {/* Sales History & Forecast Accuracy Strip */}
       <div className="acalen-card flex flex-wrap items-center justify-between gap-4 px-5 py-3.5 text-xs">
         <div className="flex flex-wrap items-center gap-3">
           <span className="inline-flex items-center gap-1.5 font-semibold text-[#15803D]">
             <CheckCircle2 className="h-4 w-4" />
-            Historical Dataset: 9 Months (Meets ≥6-Mo Minimum)
+            Sales History: 9 Months (Enough for reliable predictions)
           </span>
           <span className="hidden text-[#CBD5E1] sm:inline">|</span>
-          <span className="text-[#4B5563]">
-            Holt-Winters: <strong className="text-[#111827]">84.2%</strong> (MAPE 15.8%)
-          </span>
-          <span className="text-[#4B5563]">
-            Chronos-Bolt: <strong className="text-[#111827]">86.5%</strong> (MAPE 13.5%)
-          </span>
           <span className="rounded-md bg-[#EFF3F9] px-2.5 py-0.5 font-semibold text-[#1E325C]">
-            Ensemble: 87.4% Acc · MAPE 12.6% · RMSE 8.4 · MAE 6.2
+            Forecast Accuracy: 87.4%
           </span>
         </div>
+        <span className="text-[11px] text-[#6B7280]">
+          Holt-Winters 84.2% · Chronos-Bolt 86.5% · MAPE 12.6% · RMSE 8.4 · MAE 6.2
+        </span>
       </div>
 
       {/* Filters & Model Selector Bar */}
@@ -542,7 +539,7 @@ export const ForecastsPage: React.FC = () => {
               }`}
             >
               <Layers className="h-3.5 w-3.5" />
-              Derived Raw Ingredient Usage (BOM · {derivedRawRows.length})
+              Estimated Ingredient Needs ({derivedRawRows.length})
             </button>
           </div>
 
@@ -553,7 +550,7 @@ export const ForecastsPage: React.FC = () => {
                 : modelType === 'HOLT_WINTERS'
                   ? 'Holt-Winters Baseline'
                   : 'Chronos-Bolt ML'
-              : `Calculated from menu forecast × micro-ingredient recipes (${horizonDays}d)`}
+              : `Calculated from menu forecast × recipe amounts (${horizonDays}d)`}
           </span>
         </div>
 
@@ -634,10 +631,10 @@ export const ForecastsPage: React.FC = () => {
                 <tr>
                   <th className="px-6 py-3.5">Raw Ingredient / Supply</th>
                   <th className="px-4 py-3.5">Current Stock</th>
-                  <th className="px-4 py-3.5">Derived {horizonDays}d Usage</th>
-                  <th className="px-4 py-3.5">Menu Contributors (Top Drivers)</th>
-                  <th className="px-4 py-3.5">Projected Balance</th>
-                  <th className="px-6 py-3.5 text-right">BOM Status</th>
+                  <th className="px-4 py-3.5">Est. {horizonDays}-Day Need</th>
+                  <th className="px-4 py-3.5">Used By Menu Items</th>
+                  <th className="px-4 py-3.5">Expected Leftover</th>
+                  <th className="px-6 py-3.5 text-right whitespace-nowrap">Supply Status</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-[#F1F5F9]">
@@ -686,16 +683,16 @@ export const ForecastsPage: React.FC = () => {
                     >
                       {formatQty(row.projected_ending_stock, row.unit_label)}
                     </td>
-                    <td className="px-6 py-3.5 text-right">
+                    <td className="px-6 py-3.5 text-right whitespace-nowrap">
                       {row.status === 'SHORTAGE_RISK' ? (
-                        <span className="inline-flex items-center gap-1 rounded-full bg-[#FEF2F2] px-2.5 py-0.5 text-[11px] font-semibold text-[#C53030]">
-                          <span className="h-1.5 w-1.5 rounded-full bg-[#EF4444]" />
-                          Shortage Risk
+                        <span className="inline-flex items-center gap-1 whitespace-nowrap rounded-full bg-[#FEF2F2] px-2.5 py-0.5 text-[11px] font-semibold text-[#C53030]">
+                          <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-[#EF4444]" />
+                          May Run Out
                         </span>
                       ) : (
-                        <span className="inline-flex items-center gap-1 rounded-full bg-[#ECFDF3] px-2.5 py-0.5 text-[11px] font-semibold text-[#15803D]">
-                          <span className="h-1.5 w-1.5 rounded-full bg-[#22C55E]" />
-                          Sufficient
+                        <span className="inline-flex items-center gap-1 whitespace-nowrap rounded-full bg-[#ECFDF3] px-2.5 py-0.5 text-[11px] font-semibold text-[#15803D]">
+                          <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-[#22C55E]" />
+                          Enough Stock
                         </span>
                       )}
                     </td>

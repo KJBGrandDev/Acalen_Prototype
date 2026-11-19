@@ -42,7 +42,7 @@ const PAGE_HEADERS: Record<NavTab, { title: string; subtitle: string }> = {
   },
   rules: {
     title: 'Business Rules & Thresholds',
-    subtitle: 'Configure reorder, safety stock, margin, and expiry alert parameters',
+    subtitle: 'Set stock alerts, profit goals, and expiry reminders in plain terms',
   },
   forecasts: {
     title: 'Demand Forecasting',
@@ -164,12 +164,12 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
         <div className="rounded-xl bg-[#F8FAFC] p-3">
           <div className="flex items-center gap-2 text-xs font-semibold text-[#1E325C]">
             <ShieldCheck className="h-4 w-4 shrink-0" />
-            <span>{isManager ? 'Manager Access' : 'Cashier RBAC Active'}</span>
+            <span>{isManager ? 'Manager Access' : 'Cashier Mode (POS Only)'}</span>
           </div>
           <p className="mt-1 text-[11px] leading-relaxed text-[#6B7280]">
             {isManager
               ? 'Full inventory, forecasting, rules & decision-support permissions.'
-              : 'Restricted to counter POS, stock check & current-shift returns (RA 10173).'}
+              : 'Counter sales only — product costs, settings, and reports are hidden.'}
           </p>
         </div>
       </div>
@@ -341,7 +341,7 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
                               className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-xs text-[#374151] hover:bg-[#F3F4F6]"
                             >
                               <ClipboardList className="h-3.5 w-3.5 text-[#1E325C]" />
-                              System Audit Log
+                              Activity History
                             </button>
                           </>
                         )}
