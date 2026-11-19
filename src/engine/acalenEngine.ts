@@ -33,6 +33,69 @@ export function formatQty(qty: number, unit?: string): string {
   return unit ? `${numStr} ${unit}` : numStr;
 }
 
+export function formatStockConversion(qty: number, unit?: string): string {
+  const rounded = Math.round(qty * 1_000_000) / 1_000_000;
+  const numStr = Number.isInteger(rounded)
+    ? String(rounded)
+    : rounded.toFixed(6).replace(/\.?0+$/, '');
+  return unit ? `${numStr} ${unit}` : numStr;
+}
+
+export interface RecipeUnitOption {
+  unit: string;
+  label: string;
+  toStockFactor: number;
+}
+
+export function getCompatibleRecipeUnits(stockUnit: string): RecipeUnitOption[] {
+  const normalized = stockUnit.trim();
+  if (normalized === 'kg') {
+    return [
+      { unit: 'g', label: 'g (grams)', toStockFactor: 0.001 },
+      { unit: 'mg', label: 'mg (milligrams)', toStockFactor: 0.000001 },
+      { unit: 'kg', label: 'kg (kilograms)', toStockFactor: 1 },
+      { unit: 'oz', label: 'oz (ounces)', toStockFactor: 0.0283495 },
+    ];
+  }
+  if (normalized === 'g') {
+    return [
+      { unit: 'g', label: 'g (grams)', toStockFactor: 1 },
+      { unit: 'mg', label: 'mg (milligrams)', toStockFactor: 0.001 },
+      { unit: 'kg', label: 'kg (kilograms)', toStockFactor: 1000 },
+      { unit: 'oz', label: 'oz (ounces)', toStockFactor: 28.3495 },
+    ];
+  }
+  if (normalized === 'L') {
+    return [
+      { unit: 'mL', label: 'mL (milliliters)', toStockFactor: 0.001 },
+      { unit: 'tsp', label: 'tsp (5 mL)', toStockFactor: 0.005 },
+      { unit: 'tbsp', label: 'tbsp (15 mL)', toStockFactor: 0.015 },
+      { unit: 'fl oz', label: 'fl oz (~29.6 mL)', toStockFactor: 0.0295735 },
+      { unit: 'L', label: 'L (liters)', toStockFactor: 1 },
+    ];
+  }
+  if (normalized === 'mL') {
+    return [
+      { unit: 'mL', label: 'mL (milliliters)', toStockFactor: 1 },
+      { unit: 'tsp', label: 'tsp (5 mL)', toStockFactor: 5 },
+      { unit: 'tbsp', label: 'tbsp (15 mL)', toStockFactor: 15 },
+      { unit: 'L', label: 'L (liters)', toStockFactor: 1000 },
+    ];
+  }
+  return [{ unit: normalized, label: normalized, toStockFactor: 1 }];
+}
+
+export function convertRecipeQtyToStockUnit(
+  displayQty: number,
+  displayUnit: string,
+  stockUnit: string
+): number {
+  const options = getCompatibleRecipeUnits(stockUnit);
+  const matched = options.find((o) => o.unit === displayUnit);
+  const factor = matched ? matched.toStockFactor : 1;
+  return Math.round(displayQty * factor * 1_000_000) / 1_000_000;
+}
+
 export function formatDateShort(isoDate: string): string {
   const d = new Date(`${isoDate}T00:00:00`);
   return d.toLocaleDateString('en-US', {
@@ -329,7 +392,8 @@ export function deductStockFEFO(
         );
         if (!ingProd) continue;
 
-        let ingNeeded = Math.round(ingLine.qty_per_unit * cartItem.quantity * 1000) / 1000;
+        let ingNeeded =
+          Math.round(ingLine.qty_per_unit * cartItem.quantity * 1_000_000) / 1_000_000;
         const ingBatches = working
           .filter((b) => b.product_id === ingProd.product_id && b.qty_on_hand > 0)
           .sort((a, b) => a.expiration_date.localeCompare(b.expiration_date));
@@ -337,11 +401,13 @@ export function deductStockFEFO(
         for (const ib of ingBatches) {
           if (ingNeeded <= 0) break;
           const take = Math.min(ib.qty_on_hand, ingNeeded);
-          const roundedTake = Math.round(take * 1000) / 1000;
+          const roundedTake = Math.round(take * 1_000_000) / 1_000_000;
           if (roundedTake <= 0) continue;
 
-          ib.qty_on_hand = Math.round((ib.qty_on_hand - roundedTake) * 1000) / 1000;
-          ingNeeded = Math.round((ingNeeded - roundedTake) * 1000) / 1000;
+          ib.qty_on_hand =
+            Math.round((ib.qty_on_hand - roundedTake) * 1_000_000) / 1_000_000;
+          ingNeeded =
+            Math.round((ingNeeded - roundedTake) * 1_000_000) / 1_000_000;
 
           ingredientDeductions.push({
             batch_id: ib.batch_id,

@@ -19,9 +19,12 @@ import { useAcalen } from '../context/AcalenContext';
 import { CATEGORIES, REFERENCE_TODAY } from '../data/seedData';
 import {
   daysBetween,
+  convertRecipeQtyToStockUnit,
   formatDateShort,
   formatPeso,
   formatQty,
+  formatStockConversion,
+  getCompatibleRecipeUnits,
   getEarliestActiveBatch,
   getExpiryStatus,
   getGrossMarginPct,
@@ -62,7 +65,8 @@ export const InventoryPage: React.FC = () => {
   const [editingRecipe, setEditingRecipe] = useState(false);
   const [recipeDraft, setRecipeDraft] = useState<RecipeIngredient[]>([]);
   const [newIngredientId, setNewIngredientId] = useState<string>('1');
-  const [newIngredientQty, setNewIngredientQty] = useState<string>('0.018');
+  const [newIngredientAmount, setNewIngredientAmount] = useState<string>('18');
+  const [newIngredientUnit, setNewIngredientUnit] = useState<string>('g');
 
   const [editProductTarget, setEditProductTarget] = useState<Product | null>(null);
   const [activeModal, setActiveModal] = useState<
@@ -214,6 +218,9 @@ export const InventoryPage: React.FC = () => {
     setViewProductId(productId);
     setEditingRecipe(false);
     setRecipeDraft(p?.recipe ? p.recipe.map((r) => ({ ...r })) : []);
+    setNewIngredientId('1');
+    setNewIngredientAmount('18');
+    setNewIngredientUnit('g');
   };
 
   const openEditModal = (product: Product) => {
@@ -372,34 +379,94 @@ export const InventoryPage: React.FC = () => {
     ? enriched.find((e) => e.product.product_id === viewProductId) ?? null
     : null;
 
-  const handleAddRecipeIngredient = () => {
-    const ingId = Number(newIngredientId);
-    const qtyPerUnit = Number(newIngredientQty);
-    const ing = rawIngredientsList.find((r) => r.product_id === ingId);
-    if (!ing || qtyPerUnit <= 0) return;
+  const selectedNewIngredient = useMemo(
+    () =>
+      rawIngredientsList.find((r) => r.product_id === Number(newIngredientId)) ??
+      rawIngredientsList[0],
+    [rawIngredientsList, newIngredientId]
+  );
 
-    let displayQty = qtyPerUnit;
-    let displayUnit = ing.unit_label;
-    if (ing.unit_label === 'kg' && qtyPerUnit < 1) {
-      displayQty = Math.round(qtyPerUnit * 1000);
-      displayUnit = 'g';
-    } else if (ing.unit_label === 'L' && qtyPerUnit < 1) {
-      displayQty = Math.round(qtyPerUnit * 1000);
-      displayUnit = 'mL';
-    }
+  const compatibleNewUnits = useMemo(
+    () =>
+      selectedNewIngredient
+        ? getCompatibleRecipeUnits(selectedNewIngredient.unit_label)
+        : [],
+    [selectedNewIngredient]
+  );
+
+  const handleSelectNewIngredient = (ingIdStr: string) => {
+    setNewIngredientId(ingIdStr);
+    const ing = rawIngredientsList.find((r) => r.product_id === Number(ingIdStr));
+    if (!ing) return;
+    const units = getCompatibleRecipeUnits(ing.unit_label);
+    const defaultUnit = units[0]?.unit ?? ing.unit_label;
+    setNewIngredientUnit(defaultUnit);
+    setNewIngredientAmount(
+      defaultUnit === 'g' ? '18' : defaultUnit === 'mL' ? '150' : '1'
+    );
+  };
+
+  const handleUpdateRecipeLine = (
+    ingredientId: number,
+    nextDisplayQty: number,
+    nextDisplayUnit: string,
+    stockUnit: string
+  ) => {
+    const safeQty = Math.max(0, nextDisplayQty);
+    const convertedStockQty = convertRecipeQtyToStockUnit(
+      safeQty,
+      nextDisplayUnit,
+      stockUnit
+    );
+    setRecipeDraft((prev) =>
+      prev.map((line) =>
+        line.ingredient_id === ingredientId
+          ? {
+              ...line,
+              display_qty: safeQty,
+              display_unit: nextDisplayUnit,
+              qty_per_unit: convertedStockQty,
+            }
+          : line
+      )
+    );
+  };
+
+  const handleAddRecipeIngredient = () => {
+    const ing = selectedNewIngredient;
+    const displayQty = Number(newIngredientAmount);
+    if (!ing || displayQty <= 0) return;
+
+    const unitUsed = newIngredientUnit || compatibleNewUnits[0]?.unit || ing.unit_label;
+    const qtyPerUnit = convertRecipeQtyToStockUnit(
+      displayQty,
+      unitUsed,
+      ing.unit_label
+    );
+    if (qtyPerUnit <= 0) return;
 
     setRecipeDraft((prev) => {
-      const exists = prev.some((x) => x.ingredient_id === ingId);
+      const exists = prev.some((x) => x.ingredient_id === ing.product_id);
       if (exists) {
         return prev.map((x) =>
-          x.ingredient_id === ingId
-            ? { ingredient_id: ingId, qty_per_unit: qtyPerUnit, display_qty: displayQty, display_unit: displayUnit }
+          x.ingredient_id === ing.product_id
+            ? {
+                ingredient_id: ing.product_id,
+                qty_per_unit: qtyPerUnit,
+                display_qty: displayQty,
+                display_unit: unitUsed,
+              }
             : x
         );
       }
       return [
         ...prev,
-        { ingredient_id: ingId, qty_per_unit: qtyPerUnit, display_qty: displayQty, display_unit: displayUnit },
+        {
+          ingredient_id: ing.product_id,
+          qty_per_unit: qtyPerUnit,
+          display_qty: displayQty,
+          display_unit: unitUsed,
+        },
       ];
     });
   };
@@ -1035,10 +1102,56 @@ export const InventoryPage: React.FC = () => {
                                 </span>
                               </td>
                               <td className="px-3 py-2 font-medium text-[#1E325C] tabular-nums">
-                                {line.display_qty} {line.display_unit}{' '}
-                                <span className="text-[10px] text-[#9CA3AF]">
-                                  ({line.qty_per_unit} {ing.unit_label})
-                                </span>
+                                {editingRecipe ? (
+                                  <div className="flex items-center gap-1.5">
+                                    <input
+                                      type="number"
+                                      min="0.01"
+                                      step="any"
+                                      aria-label={`Amount of ${ing.product_name}`}
+                                      value={line.display_qty}
+                                      onChange={(e) =>
+                                        handleUpdateRecipeLine(
+                                          line.ingredient_id,
+                                          Number(e.target.value) || 0,
+                                          line.display_unit,
+                                          ing.unit_label
+                                        )
+                                      }
+                                      className="w-20 rounded-md border border-[#CBD5E1] bg-white px-2 py-1 text-xs font-semibold text-[#111827] tabular-nums focus:border-[#1E325C] focus:outline-none"
+                                    />
+                                    <select
+                                      aria-label={`Unit for ${ing.product_name}`}
+                                      value={line.display_unit}
+                                      onChange={(e) =>
+                                        handleUpdateRecipeLine(
+                                          line.ingredient_id,
+                                          line.display_qty,
+                                          e.target.value,
+                                          ing.unit_label
+                                        )
+                                      }
+                                      className="rounded-md border border-[#CBD5E1] bg-white px-2 py-1 text-xs font-medium text-[#1E325C] focus:border-[#1E325C] focus:outline-none"
+                                    >
+                                      {getCompatibleRecipeUnits(ing.unit_label).map(
+                                        (opt) => (
+                                          <option key={opt.unit} value={opt.unit}>
+                                            {opt.unit}
+                                          </option>
+                                        )
+                                      )}
+                                    </select>
+                                  </div>
+                                ) : (
+                                  <>
+                                    {line.display_qty} {line.display_unit}{' '}
+                                    {line.display_unit !== ing.unit_label && (
+                                      <span className="text-[10px] text-[#9CA3AF]">
+                                        ({formatStockConversion(line.qty_per_unit, ing.unit_label)})
+                                      </span>
+                                    )}
+                                  </>
+                                )}
                               </td>
                               <td className="px-3 py-2 tabular-nums">
                                 <span
@@ -1092,43 +1205,85 @@ export const InventoryPage: React.FC = () => {
                   </div>
 
                   {editingRecipe && (
-                    <div className="mt-3 flex flex-wrap items-end gap-2">
-                      <div className="flex-1">
-                        <label className="mb-1 block text-[10px] font-medium text-[#6B7280]">
-                          Add / Update Ingredient
-                        </label>
-                        <select
-                          value={newIngredientId}
-                          onChange={(e) => setNewIngredientId(e.target.value)}
-                          className="w-full rounded-lg border border-[#D1D5DB] bg-white px-2.5 py-1.5 text-xs"
+                    <div className="mt-3 space-y-2">
+                      <div className="flex flex-wrap items-end gap-2">
+                        <div className="min-w-[180px] flex-1">
+                          <label className="mb-1 block text-[10px] font-medium text-[#6B7280]">
+                            Add / Update Ingredient
+                          </label>
+                          <select
+                            value={newIngredientId}
+                            onChange={(e) => handleSelectNewIngredient(e.target.value)}
+                            className="w-full rounded-lg border border-[#D1D5DB] bg-white px-2.5 py-1.5 text-xs"
+                          >
+                            {rawIngredientsList.map((raw) => (
+                              <option key={raw.product_id} value={raw.product_id}>
+                                {raw.product_name} (stock: {raw.unit_label})
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                        <div className="w-24">
+                          <label className="mb-1 block text-[10px] font-medium text-[#6B7280]">
+                            Amount
+                          </label>
+                          <input
+                            type="number"
+                            step="any"
+                            min="0.01"
+                            aria-label="New ingredient amount"
+                            value={newIngredientAmount}
+                            onChange={(e) => setNewIngredientAmount(e.target.value)}
+                            className="w-full rounded-lg border border-[#D1D5DB] bg-white px-2.5 py-1.5 text-xs tabular-nums"
+                          />
+                        </div>
+                        <div className="w-36">
+                          <label className="mb-1 block text-[10px] font-medium text-[#6B7280]">
+                            Unit
+                          </label>
+                          <select
+                            aria-label="New ingredient unit"
+                            value={newIngredientUnit}
+                            onChange={(e) => setNewIngredientUnit(e.target.value)}
+                            className="w-full rounded-lg border border-[#D1D5DB] bg-white px-2.5 py-1.5 text-xs"
+                          >
+                            {compatibleNewUnits.map((opt) => (
+                              <option key={opt.unit} value={opt.unit}>
+                                {opt.label}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={handleAddRecipeIngredient}
+                          className="rounded-lg border border-[#1E325C] bg-white px-3 py-1.5 text-xs font-semibold text-[#1E325C] hover:bg-[#EFF3F9]"
                         >
-                          {rawIngredientsList.map((raw) => (
-                            <option key={raw.product_id} value={raw.product_id}>
-                              {raw.product_name} ({raw.unit_label})
-                            </option>
-                          ))}
-                        </select>
+                          + Add Line
+                        </button>
                       </div>
-                      <div className="w-32">
-                        <label className="mb-1 block text-[10px] font-medium text-[#6B7280]">
-                          Qty (in stock unit)
-                        </label>
-                        <input
-                          type="number"
-                          step="0.001"
-                          min="0.001"
-                          value={newIngredientQty}
-                          onChange={(e) => setNewIngredientQty(e.target.value)}
-                          className="w-full rounded-lg border border-[#D1D5DB] bg-white px-2.5 py-1.5 text-xs tabular-nums"
-                        />
-                      </div>
-                      <button
-                        type="button"
-                        onClick={handleAddRecipeIngredient}
-                        className="rounded-lg border border-[#1E325C] bg-white px-3 py-1.5 text-xs font-semibold text-[#1E325C] hover:bg-[#EFF3F9]"
-                      >
-                        + Add Line
-                      </button>
+                      {selectedNewIngredient &&
+                        Number(newIngredientAmount) > 0 &&
+                        newIngredientUnit !== selectedNewIngredient.unit_label && (
+                          <p className="text-[11px] text-[#6B7280]">
+                            Auto-converts:{' '}
+                            <strong className="text-[#1E325C]">
+                              {newIngredientAmount} {newIngredientUnit}
+                            </strong>{' '}
+                            ={' '}
+                            <strong className="text-[#111827]">
+                              {formatStockConversion(
+                                convertRecipeQtyToStockUnit(
+                                  Number(newIngredientAmount) || 0,
+                                  newIngredientUnit,
+                                  selectedNewIngredient.unit_label
+                                ),
+                                selectedNewIngredient.unit_label
+                              )}
+                            </strong>{' '}
+                            deducted from {selectedNewIngredient.product_name} stock
+                          </p>
+                        )}
                     </div>
                   )}
                 </div>
