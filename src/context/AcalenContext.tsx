@@ -194,6 +194,7 @@ interface AcalenContextValue {
     mode: 'VOID_ORDER' | 'RETURN_ITEM';
     itemId?: number;
     returnQty?: number;
+    itemsToReturn?: Array<{ itemId: number; returnQty: number }>;
     reason: string;
   }) => { ok: boolean; error?: string };
 
@@ -644,12 +645,14 @@ export const AcalenProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       mode,
       itemId,
       returnQty,
+      itemsToReturn,
       reason,
     }: {
       orderId: number;
       mode: 'VOID_ORDER' | 'RETURN_ITEM';
       itemId?: number;
       returnQty?: number;
+      itemsToReturn?: Array<{ itemId: number; returnQty: number }>;
       reason: string;
     }): { ok: boolean; error?: string } => {
       const targetOrder = state.orders.find((o) => o.order_id === orderId);
@@ -669,6 +672,17 @@ export const AcalenProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         batch_number: string;
       }> = [];
 
+      const returnMap = new Map<number, number>();
+      if (itemsToReturn && itemsToReturn.length > 0) {
+        for (const entry of itemsToReturn) {
+          if (entry.returnQty > 0) {
+            returnMap.set(entry.itemId, (returnMap.get(entry.itemId) ?? 0) + entry.returnQty);
+          }
+        }
+      } else if (itemId !== undefined) {
+        returnMap.set(itemId, returnQty ?? 1);
+      }
+
       const updatedItems = targetOrder.items.map((item) => {
         if (mode === 'VOID_ORDER') {
           const remainingReturnable = item.quantity - item.returned_qty;
@@ -683,11 +697,9 @@ export const AcalenProvider: React.FC<{ children: React.ReactNode }> = ({ childr
           }
           return { ...item, returned_qty: item.quantity };
         }
-        if (item.item_id === itemId) {
-          const qtyToReturn = Math.min(
-            returnQty ?? 1,
-            item.quantity - item.returned_qty
-          );
+        const requestedQty = returnMap.get(item.item_id) ?? 0;
+        if (requestedQty > 0) {
+          const qtyToReturn = Math.min(requestedQty, item.quantity - item.returned_qty);
           if (qtyToReturn > 0) {
             restoreEntries.push({
               batch_id: item.batch_id,

@@ -10,9 +10,9 @@ import {
   Search,
   ShoppingBag,
   Smartphone,
-  Trash2,
   X,
 } from 'lucide-react';
+import { ReturnVoidModal } from '../components/ReturnVoidModal';
 import { useAcalen } from '../context/AcalenContext';
 import {
   calculateOrderTotals,
@@ -46,7 +46,35 @@ export const PosPage: React.FC = () => {
   const [ewalletRef, setEwalletRef] = useState<string>('GC-20261112-901');
   const [receiptOrder, setReceiptOrder] = useState<SalesOrder | null>(null);
   const [returnModalOrder, setReturnModalOrder] = useState<SalesOrder | null>(null);
-  const [returnReason, setReturnReason] = useState('Customer requested order cancellation');
+  const [orderSearch, setOrderSearch] = useState('');
+  const [orderStatusFilter, setOrderStatusFilter] = useState<
+    'ALL' | SalesOrder['status']
+  >('ALL');
+
+  const filteredOrders = useMemo(() => {
+    const q = orderSearch.trim().toLowerCase();
+    return orders.filter((order) => {
+      if (orderStatusFilter !== 'ALL' && order.status !== orderStatusFilter) {
+        return false;
+      }
+      if (!q) return true;
+      return (
+        order.receipt_no.toLowerCase().includes(q) ||
+        order.cashier_name.toLowerCase().includes(q) ||
+        (order.ewallet_ref?.toLowerCase().includes(q) ?? false) ||
+        order.items.some((it) => it.product_name.toLowerCase().includes(q))
+      );
+    });
+  }, [orders, orderSearch, orderStatusFilter]);
+
+  const orderStatusCounts = useMemo(() => {
+    return {
+      ALL: orders.length,
+      COMPLETED: orders.filter((o) => o.status === 'COMPLETED').length,
+      PARTIAL_RETURN: orders.filter((o) => o.status === 'PARTIAL_RETURN').length,
+      VOIDED: orders.filter((o) => o.status === 'VOIDED').length,
+    };
+  }, [orders]);
 
   const posProducts = useMemo(() => {
     return products
@@ -551,7 +579,7 @@ export const PosPage: React.FC = () => {
       ) : (
         /* Shift Transactions & Returns View */
         <div className="no-print acalen-card overflow-hidden">
-          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[#E8ECF2] px-6 py-4">
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[#E8ECF2] px-6 py-4">
             <div>
               <h2 className="text-base font-semibold text-[#111827]">
                 Current Shift Sales &amp; Returns
@@ -561,7 +589,44 @@ export const PosPage: React.FC = () => {
                 batch stock.
               </p>
             </div>
+
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="relative">
+                <Search className="pointer-events-none absolute top-1/2 left-2.5 h-3.5 w-3.5 -translate-y-1/2 text-[#9CA3AF]" />
+                <input
+                  type="text"
+                  value={orderSearch}
+                  onChange={(e) => setOrderSearch(e.target.value)}
+                  placeholder="Receipt #, item, or ref..."
+                  className="w-52 rounded-lg border border-[#D1D5DB] bg-white py-1.5 pr-3 pl-8 text-xs text-[#111827] placeholder-[#9CA3AF] focus:border-[#1E325C] focus:outline-none"
+                />
+              </div>
+              <div className="inline-flex rounded-lg border border-[#E2E8F0] bg-[#F8FAFC] p-0.5 text-[11px]">
+                {(
+                  [
+                    { key: 'ALL', label: 'All' },
+                    { key: 'COMPLETED', label: 'Completed' },
+                    { key: 'PARTIAL_RETURN', label: 'Partial Return' },
+                    { key: 'VOIDED', label: 'Voided' },
+                  ] as const
+                ).map((tab) => (
+                  <button
+                    key={tab.key}
+                    type="button"
+                    onClick={() => setOrderStatusFilter(tab.key)}
+                    className={`rounded-md px-2.5 py-1 font-medium transition-colors ${
+                      orderStatusFilter === tab.key
+                        ? 'bg-white text-[#1E325C] shadow-xs'
+                        : 'text-[#64748B] hover:text-[#111827]'
+                    }`}
+                  >
+                    {tab.label} ({orderStatusCounts[tab.key]})
+                  </button>
+                ))}
+              </div>
+            </div>
           </div>
+
           <div className="overflow-x-auto">
             <table className="w-full text-left text-xs">
               <thead className="border-b border-[#E8ECF2] bg-[#F9FAFB] text-[11px] font-semibold text-[#6B7280] uppercase">
@@ -569,94 +634,156 @@ export const PosPage: React.FC = () => {
                   <th className="px-6 py-3">Receipt #</th>
                   <th className="px-4 py-3">Items &amp; Batches</th>
                   <th className="px-4 py-3">Payment / Discount</th>
-                  <th className="px-4 py-3">Total</th>
+                  <th className="px-4 py-3">Net Total</th>
                   <th className="px-4 py-3">Status</th>
                   <th className="px-6 py-3 text-right">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-[#F1F5F9]">
-                {orders.map((order) => (
-                  <tr key={order.order_id} className="hover:bg-[#F9FAFB]">
-                    <td className="px-6 py-3.5">
-                      <p className="font-mono font-semibold text-[#111827]">
-                        {order.receipt_no}
-                      </p>
-                      <p className="text-[11px] text-[#6B7280]">
-                        {new Date(order.created_at).toLocaleTimeString([], {
-                          hour: '2-digit',
-                          minute: '2-digit',
-                        })}{' '}
-                        · {order.cashier_name}
-                      </p>
-                    </td>
-                    <td className="px-4 py-3.5">
-                      <div className="space-y-0.5">
-                        {order.items.map((it) => (
-                          <p key={it.item_id} className="text-[#374151]">
-                            {it.quantity}× {it.product_name}{' '}
-                            <span className="font-mono text-[10px] text-[#9CA3AF]">
-                              ({it.batch_number})
-                            </span>
-                            {it.returned_qty > 0 && (
-                              <span className="ml-1.5 text-[10px] font-semibold text-[#B4690E]">
-                                · {it.returned_qty} returned
-                              </span>
-                            )}
-                          </p>
-                        ))}
-                      </div>
-                    </td>
-                    <td className="px-4 py-3.5 text-[#4B5563]">
-                      <p className="font-medium">
-                        {order.payment_method === 'CASH' ? 'Cash' : `E-Wallet (${order.ewallet_ref ?? ''})`}
-                      </p>
-                      <p className="text-[11px] text-[#6B7280]">
-                        {order.discount_type === 'NONE'
-                          ? 'Regular'
-                          : order.discount_type === 'SENIOR_CITIZEN'
-                            ? 'Senior Citizen 20%'
-                            : 'PWD 20%'}
-                      </p>
-                    </td>
-                    <td className="px-4 py-3.5 font-bold text-[#111827] tabular-nums">
-                      {formatPeso(order.total_amount, order.total_amount % 1 !== 0)}
-                    </td>
-                    <td className="px-4 py-3.5">
-                      <span
-                        className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-[11px] font-medium ${
-                          order.status === 'COMPLETED'
-                            ? 'bg-[#ECFDF3] text-[#15803D]'
-                            : order.status === 'VOIDED'
-                              ? 'bg-[#FEF2F2] text-[#C53030]'
-                              : 'bg-[#FFF8EB] text-[#B4690E]'
-                        }`}
-                      >
-                        {order.status}
-                      </span>
-                    </td>
-                    <td className="px-6 py-3.5 text-right">
-                      <div className="inline-flex items-center gap-2">
-                        <button
-                          type="button"
-                          onClick={() => setReceiptOrder(order)}
-                          className="rounded-lg border border-[#E2E8F0] px-2.5 py-1 text-[11px] font-medium text-[#374151] hover:bg-[#F3F4F6]"
-                        >
-                          Receipt
-                        </button>
-                        {order.status !== 'VOIDED' && (
-                          <button
-                            type="button"
-                            onClick={() => setReturnModalOrder(order)}
-                            className="inline-flex items-center gap-1 rounded-lg border border-[#FECACA] bg-[#FEF2F2] px-2.5 py-1 text-[11px] font-semibold text-[#C53030] hover:bg-[#FEE2E2]"
-                          >
-                            <RotateCcw className="h-3 w-3" />
-                            Return / Void
-                          </button>
-                        )}
-                      </div>
+                {filteredOrders.length === 0 ? (
+                  <tr>
+                    <td
+                      colSpan={6}
+                      className="px-6 py-10 text-center text-xs text-[#6B7280]"
+                    >
+                      No shift transactions match your current filter.
                     </td>
                   </tr>
-                ))}
+                ) : (
+                  filteredOrders.map((order) => {
+                    const effectiveFactor =
+                      order.subtotal > 0 ? order.total_amount / order.subtotal : 1;
+                    const refundedRaw = order.items.reduce(
+                      (sum, it) => sum + it.returned_qty * it.unit_price,
+                      0
+                    );
+                    const refundedTotal =
+                      order.status === 'VOIDED'
+                        ? order.total_amount
+                        : Number((refundedRaw * effectiveFactor).toFixed(2));
+                    const netTotal = Math.max(
+                      0,
+                      Number((order.total_amount - refundedTotal).toFixed(2))
+                    );
+
+                    const statusLabel =
+                      order.status === 'COMPLETED'
+                        ? 'Completed'
+                        : order.status === 'VOIDED'
+                          ? 'Voided'
+                          : 'Partial Return';
+
+                    return (
+                      <tr key={order.order_id} className="hover:bg-[#F9FAFB]">
+                        <td className="px-6 py-3.5">
+                          <p className="font-mono font-semibold text-[#111827]">
+                            {order.receipt_no}
+                          </p>
+                          <p className="text-[11px] text-[#6B7280]">
+                            {new Date(order.created_at).toLocaleTimeString([], {
+                              hour: '2-digit',
+                              minute: '2-digit',
+                            })}{' '}
+                            · {order.cashier_name}
+                          </p>
+                        </td>
+                        <td className="px-4 py-3.5">
+                          <div className="space-y-1">
+                            {order.items.map((it) => {
+                              const fullyReturned = it.returned_qty >= it.quantity;
+                              return (
+                                <p
+                                  key={it.item_id}
+                                  className="flex flex-wrap items-center gap-1.5 text-[#374151]"
+                                >
+                                  <span
+                                    className={
+                                      fullyReturned ? 'text-[#9CA3AF] line-through' : ''
+                                    }
+                                  >
+                                    {it.quantity}× {it.product_name}
+                                  </span>
+                                  <span className="font-mono text-[10px] text-[#9CA3AF]">
+                                    ({it.batch_number})
+                                  </span>
+                                  {fullyReturned ? (
+                                    <span className="rounded bg-[#FEF2F2] px-1.5 py-0.5 text-[10px] font-semibold text-[#C53030]">
+                                      Returned
+                                    </span>
+                                  ) : (
+                                    it.returned_qty > 0 && (
+                                      <span className="rounded bg-[#FFF8EB] px-1.5 py-0.5 text-[10px] font-semibold text-[#B4690E]">
+                                        {it.returned_qty} returned
+                                      </span>
+                                    )
+                                  )}
+                                </p>
+                              );
+                            })}
+                          </div>
+                        </td>
+                        <td className="px-4 py-3.5 text-[#4B5563]">
+                          <p className="font-medium">
+                            {order.payment_method === 'CASH'
+                              ? 'Cash'
+                              : `E-Wallet (${order.ewallet_ref ?? ''})`}
+                          </p>
+                          <p className="text-[11px] text-[#6B7280]">
+                            {order.discount_type === 'NONE'
+                              ? 'Regular'
+                              : order.discount_type === 'SENIOR_CITIZEN'
+                                ? 'Senior Citizen 20%'
+                                : 'PWD 20%'}
+                          </p>
+                        </td>
+                        <td className="px-4 py-3.5 tabular-nums">
+                          <p className="font-bold text-[#111827]">
+                            {formatPeso(netTotal, netTotal % 1 !== 0)}
+                          </p>
+                          {refundedTotal > 0 && (
+                            <p className="text-[10px] font-medium text-[#C53030]">
+                              Refunded {formatPeso(refundedTotal, refundedTotal % 1 !== 0)}
+                            </p>
+                          )}
+                        </td>
+                        <td className="px-4 py-3.5">
+                          <span
+                            className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-[11px] font-medium ${
+                              order.status === 'COMPLETED'
+                                ? 'bg-[#ECFDF3] text-[#15803D]'
+                                : order.status === 'VOIDED'
+                                  ? 'bg-[#FEF2F2] text-[#C53030]'
+                                  : 'bg-[#FFF8EB] text-[#B4690E]'
+                            }`}
+                          >
+                            {statusLabel}
+                          </span>
+                        </td>
+                        <td className="px-6 py-3.5 text-right">
+                          <div className="inline-flex items-center gap-2">
+                            <button
+                              type="button"
+                              onClick={() => setReceiptOrder(order)}
+                              className="rounded-lg border border-[#E2E8F0] px-2.5 py-1 text-[11px] font-medium text-[#374151] hover:bg-[#F3F4F6]"
+                            >
+                              Receipt
+                            </button>
+                            {order.status !== 'VOIDED' && (
+                              <button
+                                type="button"
+                                onClick={() => setReturnModalOrder(order)}
+                                className="inline-flex items-center gap-1 rounded-lg border border-[#FECACA] bg-[#FEF2F2] px-2.5 py-1 text-[11px] font-semibold text-[#C53030] hover:bg-[#FEE2E2]"
+                              >
+                                <RotateCcw className="h-3 w-3" />
+                                Return / Void
+                              </button>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })
+                )}
               </tbody>
             </table>
           </div>
@@ -794,109 +921,11 @@ export const PosPage: React.FC = () => {
 
       {/* Return / Void Order Modal */}
       {returnModalOrder && (
-        <div
-          className="no-print fixed inset-0 z-50 flex items-center justify-center bg-slate-900/45 p-4"
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="return-modal-title"
-        >
-          <div className="w-full max-w-md rounded-2xl border border-[#E8ECF2] bg-white p-6 shadow-2xl">
-            <div className="flex items-center justify-between">
-              <h2
-                id="return-modal-title"
-                className="text-base font-semibold text-[#111827]"
-              >
-                Return / Void {returnModalOrder.receipt_no}
-              </h2>
-              <button
-                type="button"
-                onClick={() => setReturnModalOrder(null)}
-                className="rounded p-1 text-[#6B7280] hover:bg-[#F3F4F6]"
-              >
-                <X className="h-4 w-4" />
-              </button>
-            </div>
-
-            <div className="mt-4 space-y-3">
-              <div>
-                <label className="mb-1 block text-xs font-medium text-[#374151]">
-                  Reason for Return / Void
-                </label>
-                <input
-                  type="text"
-                  value={returnReason}
-                  onChange={(e) => setReturnReason(e.target.value)}
-                  className="w-full rounded-lg border border-[#D1D5DB] px-3 py-2 text-xs focus:border-[#1E325C] focus:outline-none"
-                />
-              </div>
-
-              <div className="space-y-2 rounded-xl border border-[#E8ECF2] bg-[#F9FAFB] p-3">
-                <p className="text-[11px] font-semibold text-[#4B5563]">
-                  Individual Item Return (Restores FEFO Batch)
-                </p>
-                {returnModalOrder.items.map((item) => {
-                  const canReturn = item.quantity - item.returned_qty > 0;
-                  return (
-                    <div
-                      key={item.item_id}
-                      className="flex items-center justify-between gap-2 text-xs"
-                    >
-                      <span>
-                        {item.product_name} ({item.quantity - item.returned_qty} left ·{' '}
-                        <span className="font-mono text-[10px] text-[#6B7280]">
-                          {item.batch_number}
-                        </span>
-                        )
-                      </span>
-                      <button
-                        type="button"
-                        disabled={!canReturn}
-                        onClick={() => {
-                          processReturnOrVoid({
-                            orderId: returnModalOrder.order_id,
-                            mode: 'RETURN_ITEM',
-                            itemId: item.item_id,
-                            returnQty: 1,
-                            reason: returnReason,
-                          });
-                          setReturnModalOrder(null);
-                        }}
-                        className="rounded-md border border-[#D1D5DB] bg-white px-2.5 py-1 text-[11px] font-medium text-[#111827] hover:bg-[#F3F4F6] disabled:opacity-40"
-                      >
-                        Return 1
-                      </button>
-                    </div>
-                  );
-                })}
-              </div>
-
-              <div className="flex justify-end gap-2 pt-2">
-                <button
-                  type="button"
-                  onClick={() => setReturnModalOrder(null)}
-                  className="rounded-lg border border-[#E5E7EB] px-3.5 py-2 text-xs font-medium text-[#4B5563] hover:bg-[#F3F4F6]"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    processReturnOrVoid({
-                      orderId: returnModalOrder.order_id,
-                      mode: 'VOID_ORDER',
-                      reason: returnReason,
-                    });
-                    setReturnModalOrder(null);
-                  }}
-                  className="inline-flex items-center gap-1.5 rounded-lg bg-[#C53030] px-4 py-2 text-xs font-semibold text-white hover:bg-[#9B2C2C]"
-                >
-                  <Trash2 className="h-3.5 w-3.5" />
-                  Void Full Order
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
+        <ReturnVoidModal
+          order={returnModalOrder}
+          onClose={() => setReturnModalOrder(null)}
+          onConfirm={processReturnOrVoid}
+        />
       )}
     </div>
   );
